@@ -1,0 +1,26 @@
+name: Tests
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-asdf
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check src tests examples
+
+      - name: Test
+        run: uv run pytest -q

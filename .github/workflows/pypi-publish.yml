@@ -1,0 +1,55 @@
+# Publishes the package to PyPI when a GitHub release is published
+# (the release itself is created by release-publish.yml when the
+# develop -> main Release PR merges).
+#
+# Uses PyPI trusted publishing (OIDC) — no API token. The FIRST publish
+# will fail until a pending publisher is configured on PyPI for this
+# project with exactly these values:
+#
+#   PyPI project name: continuous-gtfs
+#   Owner:             continuousgtfs
+#   Repository name:   continuous-gtfs
+#   Workflow name:     pypi-publish.yml
+#   Environment name:  pypi
+#
+# Configure at https://pypi.org/manage/account/publishing/ before merging
+# the first Release PR.
+
+name: 'Publish: PyPI'
+
+on:
+  release:
+    types: [ published ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-asdf
+
+      - name: Build distributions
+        run: uv build
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/continuous-gtfs
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
