@@ -1,0 +1,53 @@
+[project]
+name = "continuous-gtfs"
+version = "0.1.0"
+description = "Define, test, and run GTFS data pipelines as Python steps"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [
+    { name = "Jarvus Innovations" },
+]
+requires-python = ">=3.12"
+keywords = ["gtfs", "gtfs-realtime", "transit", "pipeline", "data-engineering"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: GIS",
+]
+dependencies = [
+    "polars>=1.0",
+    "protobuf>=7.35.1",
+    "gtfs-realtime-bindings>=1.0",
+    "gtfs-digester>=0.4.0",
+    "blake3>=1.0.8",
+]
+
+[project.urls]
+Homepage = "https://continuousgtfs.com"
+Repository = "https://github.com/continuousgtfs/continuous-gtfs"
+Issues = "https://github.com/continuousgtfs/continuous-gtfs/issues"
+
+[project.scripts]
+continuous-gtfs = "continuous_gtfs.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "gtfs-digester>=0.4.0",
+    "ruff>=0.15.20",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.15,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
