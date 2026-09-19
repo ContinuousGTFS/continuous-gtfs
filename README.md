@@ -50,6 +50,13 @@ def drop_test_stops(ctx):
 pip install continuous-gtfs
 ```
 
+> The first PyPI release (v0.1.0) is landing shortly. Until it does, install
+> straight from this repository:
+>
+> ```console
+> pip install git+https://github.com/continuousgtfs/continuous-gtfs
+> ```
+
 Or work from a clone (uses [uv](https://docs.astral.sh/uv/)):
 
 ```console
