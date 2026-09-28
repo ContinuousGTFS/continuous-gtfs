@@ -272,9 +272,31 @@ def source_text_hash(source: str) -> str:
     return hashlib.sha256("\n".join(lines).encode()).hexdigest()
 
 
+# Exact texts of the @step misuse errors. Every callable-in-configuration
+# situation other than clean bare decoration raises loudly with one of these
+# instead of silently registering nothing (the bare-@step foot-gun that once
+# silently dropped a transform from a live pipeline).
+_STEP_BARE_WITH_CONFIG_ERROR = (
+    "@step received a function together with configuration arguments — "
+    "refusing to guess which was intended. Bare @step takes no arguments; "
+    "to configure the step, write @step(files=[...], ...) with parentheses "
+    "and pass every option by keyword."
+)
+_STEP_TOO_MANY_POSITIONAL_ERROR = (
+    "@step takes at most one positional argument (the files list). Pass "
+    "configuration by keyword, or use bare @step / @step() for a step with "
+    "defaults."
+)
+_STEP_FILES_CALLABLE_ERROR = (
+    "@step files= must be a list of filenames, got a callable. Use bare "
+    "@step or @step() to decorate with defaults; files= only accepts "
+    "filenames."
+)
+
+
 def step(
+    *args: Any,
     files: list[str] | None = None,
-    *,
     after: list[Step] | Literal["*"] | None = None,
     before: list[Step] | Literal["*"] | None = None,
     priority: int = 100,
@@ -283,7 +305,7 @@ def step(
     enabled: bool = True,
     description: str | None = None,
     findings: list[Any] | None = None,
-) -> Callable[[Callable], Step]:
+) -> Step | Callable[[Callable], Step]:
     """Decorator that wraps a function as a Step instance.
 
     Usage:
@@ -299,6 +321,14 @@ def step(
             ctx.emit_finding("stop_outside_area", ...)
 
     The decorated name becomes a Step instance, not a function.
+
+    ``@step()`` is the documented idiom. Bare ``@step`` (no parentheses) is
+    also accepted and is identical to ``@step()``: the decorated function
+    arrives as the sole positional argument with no configuration, which is
+    unambiguous because the positional slot otherwise only ever holds a
+    files list. Any other callable in the configuration — a function
+    alongside keyword options, or ``files=`` given a callable — raises
+    TypeError rather than silently registering nothing.
     """
 
     def decorator(func: Callable) -> Step:
@@ -330,4 +360,34 @@ def step(
             pass
         return s
 
+    config_supplied = not (
+        files is None
+        and after is None
+        and before is None
+        and priority == 100
+        and tags is None
+        and data_owner is None
+        and enabled is True
+        and description is None
+        and findings is None
+    )
+
+    if len(args) > 1:
+        raise TypeError(_STEP_TOO_MANY_POSITIONAL_ERROR)
+    if args:
+        (sole,) = args
+        if callable(sole):
+            # Bare @step: the decorated function is the sole positional
+            # argument. Only the clean form is accepted — one callable,
+            # nothing else supplied — and it decorates with all defaults,
+            # identical to @step().
+            if config_supplied:
+                raise TypeError(_STEP_BARE_WITH_CONFIG_ERROR)
+            return decorator(sole)
+        # Positional files list: @step(["stops.txt"])
+        if files is not None:
+            raise TypeError("step() got multiple values for argument 'files'")
+        files = sole
+    if callable(files):
+        raise TypeError(_STEP_FILES_CALLABLE_ERROR)
     return decorator

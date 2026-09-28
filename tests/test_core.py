@@ -41,6 +41,107 @@ def test_step_decorator_preserves_docstring():
     assert documented.description == "My docstring."
 
 
+def test_bare_step_decorator_registers_with_defaults():
+    @step
+    def my_step(ctx):
+        """Bare-decorated."""
+        pass
+
+    assert isinstance(my_step, Step)
+    assert my_step.files == []
+    assert my_step.after == []
+    assert my_step.before == []
+    assert my_step.priority == 100
+    assert my_step.tags == []
+    assert my_step.data_owner is None
+    assert my_step.enabled is True
+    assert my_step.description == "Bare-decorated."
+
+
+def test_bare_step_identical_to_empty_parens():
+    def fn(ctx):
+        """Same function, both spellings."""
+        pass
+
+    bare = step(fn)
+    called = step()(fn)
+
+    assert isinstance(bare, Step)
+    assert isinstance(called, Step)
+    for attr in (
+        "files",
+        "description",
+        "after",
+        "before",
+        "priority",
+        "tags",
+        "data_owner",
+        "enabled",
+        "findings",
+        "declared_findings",
+        "source_hash",
+    ):
+        assert getattr(bare, attr) == getattr(called, attr), attr
+    assert bare.apply is fn
+    assert called.apply is fn
+    assert bare._source_func is fn
+    assert bare.source_hash is not None
+
+
+def test_step_callable_with_config_raises_loudly():
+    def fn(ctx):
+        pass
+
+    with pytest.raises(TypeError) as excinfo:
+        step(fn, priority=5)
+    assert str(excinfo.value) == (
+        "@step received a function together with configuration arguments — "
+        "refusing to guess which was intended. Bare @step takes no arguments; "
+        "to configure the step, write @step(files=[...], ...) with parentheses "
+        "and pass every option by keyword."
+    )
+
+
+def test_step_files_kwarg_callable_raises_loudly():
+    def fn(ctx):
+        pass
+
+    with pytest.raises(TypeError) as excinfo:
+        step(files=fn)
+    assert str(excinfo.value) == (
+        "@step files= must be a list of filenames, got a callable. Use bare "
+        "@step or @step() to decorate with defaults; files= only accepts "
+        "filenames."
+    )
+
+
+def test_step_extra_positional_raises_loudly():
+    def fn(ctx):
+        pass
+
+    with pytest.raises(TypeError) as excinfo:
+        step(fn, ["stops.txt"])
+    assert str(excinfo.value) == (
+        "@step takes at most one positional argument (the files list). Pass "
+        "configuration by keyword, or use bare @step / @step() for a step with "
+        "defaults."
+    )
+
+
+def test_step_positional_files_still_works():
+    @step(["stops.txt"])
+    def positional_files(ctx):
+        pass
+
+    assert isinstance(positional_files, Step)
+    assert positional_files.files == ["stops.txt"]
+
+
+def test_step_positional_and_keyword_files_raises():
+    with pytest.raises(TypeError, match="multiple values for argument 'files'"):
+        step(["a.txt"], files=["b.txt"])
+
+
 def test_builtin_detection():
     b = DummyBuiltin()
     b.name = "dummy"
