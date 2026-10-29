@@ -1,6 +1,6 @@
 [project]
 name = "continuous-gtfs"
-version = "0.1.0"
+version = "0.2.0"
 description = "Define, test, and run GTFS data pipelines as Python steps"
 readme = "README.md"
 license = "Apache-2.0"
