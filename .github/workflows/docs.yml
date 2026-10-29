@@ -24,7 +24,9 @@ permissions:
 
 concurrency:
   group: docs-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseded PR builds are cancelled; a push build that may be deploying
+  # is never cancelled by the next push.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
