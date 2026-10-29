@@ -43,12 +43,13 @@ from __future__ import annotations
 import io
 import json
 from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 import blake3
 import polars as pl
 
+from .clock import system_now
 from .schedule_helpers import gtfs_time_to_seconds
 
 if TYPE_CHECKING:
@@ -513,7 +514,7 @@ def write_semantics(
     metadata = {
         "feed_digest": feed_digest,
         "rev": SEMANTICS_REV,
-        "written_at": datetime.now(UTC).isoformat(),
+        "written_at": system_now().isoformat(),
         "row_counts": row_counts,
     }
     with filesystem.open(f"{version_dir}/metadata.json", "wb") as f:

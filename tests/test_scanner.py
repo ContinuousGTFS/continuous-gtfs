@@ -365,10 +365,18 @@ def test_load_inputs_manifest_reads_init_dict(tmp_path):
     """,
     )
     manifest = load_inputs_manifest(tmp_path)
-    # Bare strings normalize to required entries.
+    # Bare strings normalize to required entries with no declared role.
     assert manifest == {
-        "schedule": {"content_kind": "gtfs_schedule_zip", "optional": False},
-        "stop_overrides": {"content_kind": "csv_table", "optional": False},
+        "schedule": {
+            "content_kind": "gtfs_schedule_zip",
+            "optional": False,
+            "role": None,
+        },
+        "stop_overrides": {
+            "content_kind": "csv_table",
+            "optional": False,
+            "role": None,
+        },
     }
 
 
@@ -391,10 +399,12 @@ def test_load_inputs_manifest_mapping_form_sets_optional(tmp_path):
     assert manifest["schedule"] == {
         "content_kind": "gtfs_schedule_zip",
         "optional": False,
+        "role": None,
     }
     assert manifest["shuttle"] == {
         "content_kind": "gtfs_schedule_zip",
         "optional": True,
+        "role": None,
     }
     # Explicit optional=False and an omitted optional key both mean required.
     assert manifest["overrides"]["optional"] is False
@@ -436,6 +446,92 @@ def test_load_inputs_manifest_mapping_unknown_key_raises(tmp_path):
     )
     with pytest.raises(ValueError, match="unknown key"):
         load_inputs_manifest(tmp_path)
+
+
+def test_load_inputs_manifest_mapping_form_sets_role(tmp_path):
+    from continuous_gtfs.scanner import load_inputs_manifest
+
+    _write_file(
+        tmp_path,
+        "__init__.py",
+        """\
+        INPUTS = {
+            "schedule": {"content_kind": "gtfs_schedule_zip", "role": "primary"},
+            "stations": {"content_kind": "gtfs_schedule_zip", "role": "supplemental"},
+            "shuttle": {
+                "content_kind": "gtfs_schedule_zip",
+                "optional": True,
+                "role": "supplemental",
+            },
+            "published": {"content_kind": "gtfs_schedule_zip", "optional": True},
+            "overrides": "csv_table",
+        }
+    """,
+    )
+    manifest = load_inputs_manifest(tmp_path)
+    assert {name: spec["role"] for name, spec in manifest.items()} == {
+        "schedule": "primary",
+        "stations": "supplemental",
+        "shuttle": "supplemental",
+        # No role key, and a bare string, both mean no declared role.
+        "published": None,
+        "overrides": None,
+    }
+    assert manifest["shuttle"]["optional"] is True
+
+
+def test_load_inputs_manifest_unknown_role_raises(tmp_path):
+    from continuous_gtfs.scanner import load_inputs_manifest
+
+    _write_file(
+        tmp_path,
+        "__init__.py",
+        'INPUTS = {"published": {"content_kind": "gtfs_schedule_zip", '
+        '"role": "reference"}}\n',
+    )
+    with pytest.raises(ValueError, match="'role' must be one of") as exc:
+        load_inputs_manifest(tmp_path)
+    message = str(exc.value)
+    assert "'published'" in message
+    assert "'primary'" in message and "'supplemental'" in message
+    assert "'reference'" in message
+    assert "specs/transform-framework.md §INPUTS manifest" in message
+
+
+def test_load_inputs_manifest_two_primaries_raise_naming_both(tmp_path):
+    from continuous_gtfs.scanner import load_inputs_manifest
+
+    _write_file(
+        tmp_path,
+        "__init__.py",
+        """\
+        INPUTS = {
+            "base": {"content_kind": "gtfs_schedule_zip", "role": "primary"},
+            "overrides": "csv_table",
+            "shuttle": {"content_kind": "gtfs_schedule_zip", "role": "primary"},
+        }
+    """,
+    )
+    with pytest.raises(ValueError, match="more than one primary input") as exc:
+        load_inputs_manifest(tmp_path)
+    assert "'base'" in str(exc.value)
+    assert "'shuttle'" in str(exc.value)
+
+
+def test_load_inputs_manifest_optional_primary_raises(tmp_path):
+    from continuous_gtfs.scanner import load_inputs_manifest
+
+    _write_file(
+        tmp_path,
+        "__init__.py",
+        'INPUTS = {"schedule": {"content_kind": "gtfs_schedule_zip", '
+        '"optional": True, "role": "primary"}}\n',
+    )
+    # The optional-primary rule, not a shape error: the entry's shape is valid.
+    with pytest.raises(ValueError, match="primary input and cannot be optional") as exc:
+        load_inputs_manifest(tmp_path)
+    assert "'schedule'" in str(exc.value)
+    assert "unknown key" not in str(exc.value)
 
 
 def test_load_inputs_manifest_mapping_unknown_kind_raises(tmp_path):

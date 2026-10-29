@@ -21,7 +21,26 @@ if TYPE_CHECKING:
 
 @dataclass
 class MatchCondition:
-    """A single field match: exact value or regex pattern."""
+    """One test on one field: an exact `value` or a `regex` pattern.
+
+    Conditions select the rows a row-operation builtin acts on. They
+    combine as groups: a flat list is one all-of group; a list of lists is
+    any-of across groups. See the [builtins guide](../guide/builtins.md).
+
+    Args:
+        field: The column the test reads.
+        value: Match rows whose field equals this string exactly.
+        regex: Match rows whose field contains a match for this pattern
+            (Polars `str.contains`, Rust regex syntax; anchor with `^`
+            and `$` to match the whole value). Give `value` or `regex`,
+            not both.
+
+    Examples:
+        ```python
+        MatchCondition("route_id", value="ROUTE_B")
+        MatchCondition("service_id", regex=r"^RAIL")
+        ```
+    """
 
     field: str
     value: str | None = None
@@ -39,7 +58,16 @@ class MatchCondition:
 #: (specs/transform-framework.md §Selecting rows). Shared across schedule
 #: builtins so an operator sees one issue per missing column per file.
 COLUMN_MISSING = "column_missing"
-_COLUMN_MISSING_DECL = (COLUMN_MISSING, {"subject": ["file", "column"]})
+_COLUMN_MISSING_DECL = (
+    COLUMN_MISSING,
+    {
+        "subject": ["file", "column"],
+        "description": (
+            "A condition or sort key named a column the file lacks; "
+            "the step left the file untouched."
+        ),
+    },
+)
 
 
 def _normalize_groups(
@@ -115,12 +143,58 @@ def _build_group_mask(
 
 
 class RemoveRows(Step):
-    """Remove rows from a GTFS file matching conditions.
+    """Remove the rows of one file that match conditions.
 
-    `conditions` and `exclude` share one shape: a flat list is one all-of
-    group, a list of lists is any-of across groups. Rows matching any
-    exclude group are protected from removal.
+    Mechanical: one file, one mask, no knowledge of what the rows mean. To
+    remove a route, trip, stop, or service with everything that belongs to
+    it, use a semantic removal instead.
+
+    Args:
+        file: The GTFS file to edit, such as `"routes.txt"`.
+        conditions: Which rows to remove: a flat list of
+            [`MatchCondition`][continuous_gtfs.builtins.schedule.MatchCondition]
+            (all must hold) or a list of lists (any group may hold).
+        exclude: Groups in the same shape; a row matching any of them is
+            protected from removal.
+        description: Label shown in the Console. Defaults to
+            `Remove rows from <file>`.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
+
+    Note:
+        A file absent from the output, or an empty `conditions` list, is a
+        silent no-op. A condition naming a column the file lacks leaves the
+        file untouched and emits `column_missing`, one per missing column.
+
+    Examples:
+        ```python
+        remove_route = RemoveRows(
+            "routes.txt",
+            [MatchCondition("route_id", value="OLD_ROUTE")],
+            description="Remove deprecated route",
+        )
+
+        # Any-of: three stops in one step instead of three steps
+        remove_station_family = RemoveRows(
+            "stops.txt",
+            [
+                [MatchCondition("stop_id", value="STN_1")],
+                [MatchCondition("stop_id", value="STN_1-T1")],
+                [MatchCondition("stop_id", value="STN_1-T2")],
+            ],
+        )
+
+        # Every RAIL service except the Spring 2026 one
+        remove_rail = RemoveRows(
+            "calendar.txt",
+            [MatchCondition("service_id", regex=r"^RAIL")],
+            exclude=[[MatchCondition("service_id", value="RAIL_SP26")]],
+        )
+        ```
     """
+
+    category = "Row operations"
 
     findings = [_COLUMN_MISSING_DECL]
 
@@ -158,11 +232,42 @@ class RemoveRows(Step):
 
 
 class UpdateFields(Step):
-    """Update field values on rows matching conditions.
+    """Set field values on the rows of one file that match conditions.
 
-    `conditions` is a flat list (all must match) or a list of groups (a row
-    matches if it satisfies any group) — see §Selecting rows in the spec.
+    Args:
+        file: The GTFS file to edit.
+        conditions: Which rows to update, in the
+            [`RemoveRows`][continuous_gtfs.builtins.schedule.RemoveRows]
+            group shape.
+        updates: Column name to new value. A column the file does not have
+            is ignored.
+        description: Label shown in the Console. Defaults to
+            `Update fields in <file>`.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
+
+    Note:
+        A file absent from the output, or an empty `conditions` list, is a
+        silent no-op. A condition naming a column the file lacks leaves the
+        file untouched and emits `column_missing`, one per missing column.
+
+    Examples:
+        ```python
+        update_route = UpdateFields(
+            "routes.txt",
+            [MatchCondition("route_id", value="ROUTE_A")],
+            {
+                "route_long_name": "Northside - Downtown",
+                "route_color": "007CAD",
+                "route_text_color": "FFFFFF",
+            },
+            description="Update route A metadata",
+        )
+        ```
     """
+
+    category = "Row operations"
 
     findings = [_COLUMN_MISSING_DECL]
 
@@ -206,10 +311,38 @@ class UpdateFields(Step):
 
 
 class ClearField(Step):
-    """Clear (set to empty string) a field on matching rows.
+    """Set one field to the empty string on the rows that match conditions.
 
-    `conditions` takes the same flat-or-grouped shape as `UpdateFields`.
+    Args:
+        file: The GTFS file to edit.
+        field: The column to clear. A column the file does not have is
+            ignored.
+        conditions: Which rows to clear, in the
+            [`RemoveRows`][continuous_gtfs.builtins.schedule.RemoveRows]
+            group shape.
+        description: Label shown in the Console. Defaults to
+            `Clear <field> in <file>`.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
+
+    Note:
+        A file absent from the output, or an empty `conditions` list, is a
+        silent no-op. A condition naming a column the file lacks leaves the
+        file untouched and emits `column_missing`, one per missing column.
+
+    Examples:
+        ```python
+        clear_blocks = ClearField(
+            "trips.txt",
+            "block_id",
+            [MatchCondition("route_id", value="COMMUTER_RAIL")],
+            description="Clear block_id for the commuter rail route",
+        )
+        ```
     """
+
+    category = "Row operations"
 
     findings = [_COLUMN_MISSING_DECL]
 
@@ -250,7 +383,31 @@ class ClearField(Step):
 
 
 class UpdateFeedInfo(Step):
-    """Update feed_info.txt metadata fields."""
+    """Set publisher fields on every row of `feed_info.txt`.
+
+    Args:
+        publisher_name: New `feed_publisher_name`.
+        publisher_url: New `feed_publisher_url`.
+        feed_lang: New `feed_lang`.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
+
+    Note:
+        Only the fields given are written; a column the file lacks is
+        ignored, and a feed with no `feed_info.txt` is a silent no-op.
+
+    Examples:
+        ```python
+        update_feed = UpdateFeedInfo(
+            publisher_name="Example Transit",
+            publisher_url="https://transit.example.org",
+            feed_lang="en",
+        )
+        ```
+    """
+
+    category = "Feed metadata"
 
     files = ["feed_info.txt"]
 
@@ -283,29 +440,44 @@ class UpdateFeedInfo(Step):
 
 
 class TransformTripId(Step):
-    """Regex substitution on every trip_id column across the schedule.
+    """Rewrite every trip-id column across the schedule with a regex substitution.
 
-    Mirrors the realtime `TransformTripId` builtin: both accept the same
-    `(pattern, replacement)` pair so an agency can rewrite trip IDs
-    consistently across schedule and RT outputs. See
-    `specs/configuration.md` §Cross-pipeline shared modules for
-    the recommended way to share the regex source between pipelines.
+    Operates on the three column names that carry trip references:
+    `trip_id` (`trips.txt`, `stop_times.txt`, `frequencies.txt`,
+    `attributions.txt`) and `from_trip_id` / `to_trip_id`
+    (`transfers.txt`). Any other column is left untouched.
 
-    Operates on three GTFS column names that carry trip-id references:
-    `trip_id` (trips.txt, stop_times.txt, frequencies.txt,
-    attributions.txt), and `from_trip_id` / `to_trip_id` (transfers.txt).
-    Any other column is left untouched.
+    Mirrors the realtime
+    [`TransformTripId`][continuous_gtfs.builtins.realtime.TransformTripId]:
+    both take the same `(pattern, replacement)` pair so an agency can
+    rewrite trip ids consistently across schedule and realtime outputs
+    (specs/configuration.md §Cross-pipeline shared modules).
 
-    Note on regex flavor: this builtin uses Polars `str.replace_all`,
-    which compiles patterns with Rust's `regex` crate. The realtime
-    counterpart uses Python's `re` module. For cross-pipeline patterns
-    that need to behave identically in both, stay within their common
-    subset — character classes, alternation, anchors, quantifiers, and
-    `()` capture groups. Backreferences differ (`$1` here, `\\1` in the
-    RT builtin), so prefer patterns without backreferences for shared
-    constants, or maintain two replacement strings in the shared
-    constants module.
+    Args:
+        pattern: The regex to find, compiled by Polars (Rust `regex`
+            syntax).
+        replacement: The replacement text; capture groups are `$1`, `$2`.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
+
+    Note:
+        The realtime counterpart uses Python's `re`, where capture
+        references are `\\1`. For a pattern shared between the two
+        pipelines, stay within the common subset (character classes,
+        alternation, anchors, quantifiers, `()` groups) and keep two
+        replacement strings, or avoid backreferences.
+
+    Examples:
+        ```python
+        shorten_trip_ids = TransformTripId(
+            pattern=r"^LONG_PREFIX_(\\d+)$",
+            replacement=r"T-$1",
+        )
+        ```
     """
+
+    category = "Identifiers"
 
     TRIP_ID_COLUMNS = ("trip_id", "from_trip_id", "to_trip_id")
 
@@ -335,30 +507,38 @@ class TransformTripId(Step):
 
 
 class InitScheduleOutput(Step):
-    """Seed ctx.output from a gtfs_schedule_zip input before other steps run.
+    """Seed `ctx.output` from a schedule input before any other step runs.
 
-    The common case for a schedule pipeline: one primary schedule input
-    is unpacked into ctx.output so transforms have something to mutate.
-    This builtin captures that one-liner so agency pipelines don't each
-    need their own `@step(before="*")` boilerplate.
+    `ctx.output` starts empty; this step copies the named
+    `gtfs_schedule_zip` input into it so transforms have something to
+    mutate. `ctx.inputs[input_name]` stays as it was, so a step that wants
+    the pristine schedule (a supplemental merge, a diff) can still read it.
+    One of these replaces the `@step(before="*")` boilerplate every schedule
+    pipeline would otherwise carry.
 
-    ctx.output becomes a shallow copy of the named input's
-    dict[filename → DataFrame]. Subsequent transforms mutate ctx.output;
-    ctx.inputs[input_name] stays as-is so steps that want to read the
-    unmutated version (e.g. merging a supplemental feed, diffing
-    against the pristine schedule) can do so.
+    Args:
+        input_name: The input to seed from, as declared in the pipeline's
+            `INPUTS` manifest.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step]. A `before=` argument is ignored:
+            this step always runs first.
 
-    Runs before every other step via before="*". If the named input
-    wasn't supplied at dispatch, or the shape isn't a dict of DataFrames
-    (i.e. not a gtfs_schedule_zip), applies() fails with a clear error.
+    Note:
+        Fails the run with a clear error when the named input was not
+        supplied, or is not a `gtfs_schedule_zip` (a mapping of file name
+        to DataFrame).
 
-    Usage:
-
+    Examples:
+        ```python
         # pipelines/schedule/init.py
         from continuous_gtfs.builtins.schedule import InitScheduleOutput
 
         init = InitScheduleOutput("schedule")
+        ```
     """
+
+    category = "Init"
 
     def __init__(self, input_name: str = "schedule", **kwargs: Any):
         # before="*" is the whole point of this builtin — silently
@@ -396,9 +576,19 @@ class InitScheduleOutput(Step):
 class SortKey:
     """One `SortRows` key: which field, which direction, how values compare.
 
-    `numeric=True` compares the values as numbers (`9` before `10`) instead
-    of as text (`10` before `9`). The cast is for comparison only — the
-    written values are never touched.
+    Args:
+        field: The column to sort by.
+        descending: Sort this key high to low.
+        numeric: Compare the values as numbers (`9` before `10`) instead of
+            as text (`10` before `9`). The cast is for comparison only; the
+            written values are never touched. A value that does not parse
+            sorts last and is counted in a `sort_key_not_numeric` finding.
+
+    Examples:
+        ```python
+        SortKey("stop_sequence", numeric=True)
+        SortKey("start_date", descending=True)
+        ```
     """
 
     field: str
@@ -422,28 +612,57 @@ def _sortable_text(field: str) -> pl.Expr:
 
 
 class SortRows(Step):
-    """Reorder a GTFS file's rows so their order is a pure function of content.
+    """Order a file's rows so their order is a pure function of content.
 
-    Sorts by the caller's keys, then breaks every remaining tie by every
-    column of the file in header order (ascending, as text). Two runs whose
-    upstream steps hand the file over in different row orders therefore
-    write byte-identical files — which is what keeps `content_hash` output
-    versions stable. See specs/transform-framework.md §Sort.
+    Sorts by the given keys, then breaks every remaining tie by every
+    column of the file in header order (ascending, as text). Two runs
+    whose upstream steps hand the file over in different row orders
+    therefore write byte-identical files, which is what keeps content-hash
+    output versions stable. Use it on any file a merge or dedup step
+    leaves in an order that varies between runs.
 
-    Defaults to `after="*"` so it runs after every other step touching the
-    file; an explicit `after=[...]` is honored as an override.
+    Args:
+        file: The GTFS file to reorder.
+        by: The sort keys, in precedence order: a
+            [`SortKey`][continuous_gtfs.builtins.schedule.SortKey], or a
+            bare column name as shorthand for an ascending text key.
+        description: Label shown in the Console. Defaults to
+            `Sort <file> by <keys>`.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
 
-    Usage:
+    Note:
+        Defaults to `after="*"` so it runs after every other step that
+        touches the file; an explicit `after=[...]` is honored. Empty string
+        and null are one value and sort last in either direction. Header
+        order is untouched. A missing file is a silent no-op; a missing sort
+        field leaves the file unsorted and emits `column_missing`.
 
+    Examples:
+        ```python
         sort_stop_times = SortRows(
             "stop_times.txt",
             ["trip_id", SortKey("stop_sequence", numeric=True)],
         )
+        ```
     """
+
+    category = "Ordering"
 
     findings = [
         _COLUMN_MISSING_DECL,
-        ("sort_key_not_numeric", {"subject": ["file", "column"]}),
+        (
+            "sort_key_not_numeric",
+            {
+                "subject": ["file", "column"],
+                "description": (
+                    "Values under a `numeric` sort key did not parse as "
+                    "numbers; they sorted last. The count is the number "
+                    "of such values."
+                ),
+            },
+        ),
     ]
 
     def __init__(

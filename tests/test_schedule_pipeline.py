@@ -215,9 +215,7 @@ def test_cross_pipeline_shared_module_example_loads():
     from a sibling shared module."""
     from continuous_gtfs.scanner import discover_pipelines
 
-    example_root = (
-        Path(__file__).parent.parent / "examples" / "cross-pipeline-trip-id"
-    )
+    example_root = Path(__file__).parent.parent / "examples" / "cross-pipeline-trip-id"
     if not example_root.is_dir():
         pytest.skip("cross-pipeline-trip-id example not present")
 
@@ -1160,3 +1158,122 @@ def test_package_zip_uncompressed(tmp_path):
     with zipfile.ZipFile(io.BytesIO(uncompressed)) as zf:
         assert set(zf.namelist()) == {"agency.txt", "routes.txt"}
         assert zf.getinfo("agency.txt").compress_type == zipfile.ZIP_STORED
+
+
+def _packaging_frames() -> dict[str, pl.DataFrame]:
+    return {
+        "routes.txt": pl.DataFrame(
+            {"route_id": ["R1", "R2"], "route_type": ["3", "3"]}
+        ),
+        "agency.txt": pl.DataFrame(
+            {"agency_name": ["A"], "agency_url": ["u"], "agency_timezone": ["UTC"]}
+        ),
+    }
+
+
+def test_package_zip_is_byte_deterministic(monkeypatch):
+    """specs/asset-registry.md §Output Assets: identical tables, identical bytes.
+
+    The clock is moved between the two packings so a wall-clock-stamped
+    encoding (the old zipfile.writestr path) would fail this test.
+    """
+    import time as _time
+
+    from continuous_gtfs.pipelines.schedule import package_zip
+
+    frames = _packaging_frames()
+    for compress in (True, False):
+        first = package_zip(frames, compress=compress)
+        later = _time.time() + 3 * 86400
+        monkeypatch.setattr(_time, "time", lambda later=later: later)
+        monkeypatch.setattr(
+            _time, "localtime", lambda *_a, later=later: _time.gmtime(later)
+        )
+        second = package_zip(frames, compress=compress)
+        monkeypatch.undo()
+        assert first == second
+        # Member order is the packer's, not the caller's dict order.
+        assert (
+            package_zip(dict(reversed(list(frames.items()))), compress=compress)
+            == first
+        )
+
+
+def test_package_zip_changed_row_changes_bytes():
+    from continuous_gtfs.pipelines.schedule import package_zip
+
+    frames = _packaging_frames()
+    changed = dict(frames)
+    changed["routes.txt"] = pl.DataFrame(
+        {"route_id": ["R1", "R3"], "route_type": ["3", "3"]}
+    )
+    assert package_zip(changed) != package_zip(frames)
+
+
+def test_package_zip_entries_carry_fixed_metadata():
+    import zipfile
+
+    from continuous_gtfs.pipelines.schedule import package_zip
+
+    with zipfile.ZipFile(io.BytesIO(package_zip(_packaging_frames()))) as zf:
+        assert zf.testzip() is None
+        infos = zf.infolist()
+        assert [i.filename for i in infos] == ["agency.txt", "routes.txt"]
+        for info in infos:
+            assert info.date_time == (1980, 1, 1, 0, 0, 0)
+            assert info.extra == b""
+            assert info.compress_type == zipfile.ZIP_DEFLATED
+            assert info.flag_bits == 0x0800  # UTF-8 names, nothing else
+            assert info.external_attr == 0
+            assert info.internal_attr == 0
+            assert info.create_system == 0
+    assert extract_zip(package_zip(_packaging_frames()))["routes.txt"][
+        "route_id"
+    ].to_list() == [
+        "R1",
+        "R2",
+    ]
+
+
+# sha256 of package_zip(_golden_frames()) per mode. These pin the encoding
+# (specs/asset-registry.md §Output Assets): a change to entry order, header
+# fields, timestamps, or the DEFLATE level changes them, and would mint a
+# phantom output version on every environment's next run. A zlib or polars
+# upgrade (in the image) may legitimately change the bytes; regenerate the
+# digests then, and only then, noting the cause in the commit.
+PACKAGE_ZIP_GOLDEN_SHA256 = {
+    True: "9f635cea1f59dea277fef3485732d08855d9dea674914b4f6f2b1c5843558351",
+    False: "3c65e7629eecbbbef693e73be0c38aebe4ad2429bb1731dbd0de3f8ad26cf4ba",
+}
+
+
+def _golden_frames() -> dict[str, pl.DataFrame]:
+    # Large enough that DEFLATE levels produce different streams, so the
+    # digest catches a level change, not just a header change.
+    n = 4000
+    return {
+        "stop_times.txt": pl.DataFrame(
+            {
+                "trip_id": [f"t{i // 40}" for i in range(n)],
+                "stop_sequence": [str(i % 40) for i in range(n)],
+                "arrival_time": [
+                    f"{6 + i % 17:02d}:{(i * 7) % 60:02d}:00" for i in range(n)
+                ],
+            }
+        ),
+        "agency.txt": pl.DataFrame(
+            {"agency_name": ["A"], "agency_url": ["u"], "agency_timezone": ["UTC"]}
+        ),
+    }
+
+
+@pytest.mark.parametrize("compress", [True, False])
+def test_package_zip_matches_golden_digest(compress):
+    import hashlib
+
+    from continuous_gtfs.pipelines.schedule import package_zip
+
+    digest = hashlib.sha256(
+        package_zip(_golden_frames(), compress=compress)
+    ).hexdigest()
+    assert digest == PACKAGE_ZIP_GOLDEN_SHA256[compress]

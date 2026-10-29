@@ -240,5 +240,23 @@ def load_inputs(
                 f"they expect the declared shape.",
                 stacklevel=2,
             )
-        inputs[name] = parse(kind, path.read_bytes())
+        if path.is_dir():
+            # A file_tree input may be a DIRECTORY: it is packed with the
+            # same canonical packer the fetcher uses, so fixtures stay loose
+            # files on disk and every local run exercises the packer's
+            # determinism (specs/transform-framework.md §Running Pipelines
+            # Locally). A .zip path passes through below as the archive
+            # itself. No other kind accepts a directory.
+            if kind != "file_tree":
+                raise ValueError(
+                    f"--input {name}={path} is a directory, but its "
+                    f"content_kind is {kind!r} — only file_tree inputs "
+                    f"accept a directory."
+                )
+            from .canonical_zip import pack_tree
+
+            raw = pack_tree(path)
+        else:
+            raw = path.read_bytes()
+        inputs[name] = parse(kind, raw)
     return inputs

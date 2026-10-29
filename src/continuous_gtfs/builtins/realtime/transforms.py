@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Iterator, Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from google.transit import gtfs_realtime_pb2 as gtfs_rt
@@ -65,7 +65,20 @@ def _rt_feeds(ctx: PipelineContext) -> Iterator[tuple[str, gtfs_rt.FeedMessage]]
 
 
 class PassThrough(Step):
-    """No-op transform for baseline measurement."""
+    """Do nothing; a baseline for equivalence tests and measurement.
+
+    Args:
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
+
+    Examples:
+        ```python
+        passthrough = PassThrough()
+        ```
+    """
+
+    category = "Testing"
 
     description = "Pass-through (no-op)"
 
@@ -74,13 +87,33 @@ class PassThrough(Step):
 
 
 class FilterStopsByID(Step):
-    """Remove stop_time_updates and vehicle stop references for blocklisted stops.
+    """Drop references to blocklisted stops from trip updates and vehicle positions.
 
-    A stop_id matches the blocklist if it's in the explicit `blocked_stop_ids`
-    set OR its `blocked_stop_id_regex` finds a match (Python `re.search`
-    semantics — anchor with `^` / `$` for whole-string matching). At least
-    one of the two must be supplied; supplying both unions them.
+    On a `TripUpdate`, the `stop_time_update` entries whose `stop_id` is
+    blocked are removed. On a `VehiclePosition` at a blocked stop,
+    `stop_id`, `current_stop_sequence` and `current_status` are cleared.
+    Alerts are left alone. Use it to hide stations that are not yet open
+    during simulated service.
+
+    Args:
+        blocked_stop_ids: Stop ids to block, matched exactly.
+        blocked_stop_id_regex: A pattern a stop id must contain a match
+            for to be blocked (Python `re.search`; anchor with `^` and `$`
+            to match the whole id). Give one of the two or both; they
+            union.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
+
+    Examples:
+        ```python
+        filter_stops = FilterStopsByID(blocked_stop_ids={"STN_8", "STN_9"})
+
+        filter_expansion = FilterStopsByID(blocked_stop_id_regex=r"^EXT_")
+        ```
     """
+
+    category = "Filtering"
 
     def __init__(
         self,
@@ -135,13 +168,36 @@ class FilterStopsByID(Step):
 
 
 class CombineFeeds(Step):
-    """Merge entities from additional RT inputs into a target output feed.
+    """Merge entities from additional realtime inputs into one output feed.
 
-    Scoped within a single feed type (e.g. merging two vehicle_positions
-    sources from different vendors into one output). Across-type merging
-    is deliberately not supported — RT outputs are per-feed-type, not a
-    single combined FeedMessage.
+    Entities are added by id; an id already present in the target wins, so
+    the primary feed takes precedence over the sources. Merging is within
+    one feed type (two vehicle-positions sources into one vehicle-positions
+    output); realtime outputs are per feed type, so there is no combined
+    feed to merge across types.
+
+    Args:
+        target: The output feed to merge into (a `ctx.output` key such as
+            `"vehicle_positions"`). An absent target is seeded as an empty
+            feed, so this step can also act as the init step for an output
+            that exists only as inputs.
+        sources: Input names (`ctx.inputs` keys, as declared in the
+            pipeline's `INPUTS` manifest) whose entities are merged in. An
+            unsupplied or non-realtime input is skipped.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
+
+    Examples:
+        ```python
+        combine = CombineFeeds(
+            target="vehicle_positions",
+            sources=["vendor_b_positions", "vendor_c_positions"],
+        )
+        ```
     """
+
+    category = "Merging"
 
     def __init__(
         self,
@@ -181,7 +237,25 @@ class CombineFeeds(Step):
 
 
 class RenameVehicles(Step):
-    """Prefix vehicle IDs and labels with a configurable string."""
+    """Prefix vehicle ids and labels with a string.
+
+    Applies to entities with a `vehicle.vehicle` descriptor. Idempotent: an
+    id or label that already starts with the prefix is left alone. Use it
+    to namespace vehicles when combining feeds from several vendors.
+
+    Args:
+        id_prefix: The prefix to add, such as `"AGENCY-"`.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
+
+    Examples:
+        ```python
+        rename = RenameVehicles(id_prefix="AGENCY-")
+        ```
+    """
+
+    category = "Identifiers"
 
     def __init__(self, id_prefix: str, **kwargs: Any):
         super().__init__(**kwargs)
@@ -200,7 +274,21 @@ class RenameVehicles(Step):
 
 
 class UpdateFeedHeader(Step):
-    """Set GTFS-RT header version on every RT output."""
+    """Set the GTFS-RT version on every output feed's header.
+
+    Args:
+        version: The `gtfs_realtime_version` to write.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
+
+    Examples:
+        ```python
+        header = UpdateFeedHeader(version="2.0")
+        ```
+    """
+
+    category = "Feed header"
 
     description = "Update feed header metadata"
 
@@ -214,7 +302,31 @@ class UpdateFeedHeader(Step):
 
 
 class TransformTripId(Step):
-    """Regex substitution on trip_id across all entities in every RT output."""
+    """Rewrite trip ids on trip updates and vehicle positions with a regex substitution.
+
+    Applies to `trip_update.trip.trip_id` and `vehicle.trip.trip_id` on
+    every output feed. Alert informed entities are not rewritten. Mirrors
+    the schedule
+    [`TransformTripId`][continuous_gtfs.builtins.schedule.TransformTripId]
+    so an agency can rewrite trip ids consistently across both outputs.
+
+    Args:
+        pattern: The regex to find (Python `re` syntax).
+        replacement: The replacement text; capture groups are `\\1`, `\\2`.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
+
+    Examples:
+        ```python
+        transform_trip = TransformTripId(
+            pattern=r"^LONG_PREFIX_(\\d+)$",
+            replacement=r"T-\\1",
+        )
+        ```
+    """
+
+    category = "Identifiers"
 
     def __init__(self, pattern: str, replacement: str, **kwargs: Any):
         super().__init__(**kwargs)
@@ -264,26 +376,25 @@ class TransformTripId(Step):
 # with an early-morning grace window (default 04:00) treating the small
 # hours of the calendar morning as the previous service day. Tests and
 # operators can inject an explicit `now: datetime` for determinism; the
-# default reads `datetime.now(timezone.utc)`.
+# default is the context clock `ctx.now` — the run's evaluation moment —
+# never the system clock (specs/transform-framework.md §PipelineContext).
 # ============================================================
 
 
 def _now_seconds_for_schedule(
     schedule: Mapping[str, pl.DataFrame],
-    now: datetime | None,
+    now: datetime,
     threshold_hour: int,
 ) -> tuple[int, datetime, datetime]:
     """Resolve the agency-tz "now" → (seconds_into_service_day, service_start, now_tz).
 
     `now` is interpreted in the agency's local timezone (read from
-    `agency.txt`); callers may pass any tz-aware datetime or None to use
-    system time. `service_start` is the service-day-start in the agency
+    `agency.txt`); callers pass any tz-aware datetime — the step's injected
+    `now`, else `ctx.now`. `service_start` is the service-day-start in the agency
     timezone; `now_tz` is `now` converted to that timezone.
     """
     tz = agency_timezone(schedule)
-    if now is None:
-        now_tz = datetime.now(UTC).astimezone(tz)
-    elif now.tzinfo is None:
+    if now.tzinfo is None:
         raise ValueError(
             "InsertMissingCancellations / ExpireCancelledTrips: "
             "`now` must be a tz-aware datetime"
@@ -296,35 +407,46 @@ def _now_seconds_for_schedule(
 
 
 class ExpireCancelledTrips(Step):
-    """Drop cancellation entities whose trip has finished per schedule.
+    """Drop cancellations whose trip has already ended per the schedule.
 
-    Cancellations currently in the input are kept *if and only if* the
-    trip's scheduled end has not yet passed. Stale cancellations are
-    dropped. Time is resolved in the agency's local timezone via
-    `agency.txt` — see the module-level note.
+    A `CANCELED` entity in the target feed is kept only while its trip's
+    scheduled end has not passed; stale cancellations are dropped. Time is
+    resolved in the agency's local timezone from `agency.txt`. This is the
+    stateless half of the "preserve cancelled trips" contract; see
+    `previous_output_input` for the rest.
 
-    Operates on a single `target` feed (default `trip_updates`), like
-    `InsertMissingCancellations`. Cancellations are a trip_updates
-    concept; the step deliberately does not touch other feeds such as
-    `vehicle_positions`.
+    Args:
+        target: The feed to operate on. Cancellations are a trip-updates
+            concept, so other feeds are never touched.
+        schedule_input: The `gtfs_schedule_zip` input the trip times are
+            read from, as declared in the pipeline's `INPUTS` manifest.
+        previous_output_input: Name of an input bound to this pipeline's
+            own previous output. When set, `CANCELED` entities from it
+            that are still within their scheduled window and are not
+            referenced in the current input are carried forward before
+            the stale pass runs, so a cancellation survives upstream
+            dropping it. The orchestrator resolves "latest at run start",
+            so the first run sees an empty previous output.
+        service_day_threshold_hour: Local hour at which the service day
+            rolls over; trips before it belong to the previous day.
+        now: The evaluation moment. Defaults to `ctx.now`; set only in
+            tests.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
 
-    Optional cross-run preservation
-    -------------------------------
-    By itself this builtin is the stateless half of a "preserve
-    cancelled trips" contract. The full intent —
-    keeping a cancellation in output across runs even after upstream
-    drops it — additionally requires reading the prior run's output.
+    Examples:
+        ```python
+        expire_cancellations = ExpireCancelledTrips()
 
-    Set `previous_output_input` to the name of an input slot bound to
-    the pipeline's own previous output (a `gtfs_rt_protobuf` asset).
-    When set, CANCELED entities from the previous output that are
-    still within their scheduled service window AND aren't already
-    referenced in the current input feed are merged into the working
-    FeedMessage before the expire-stale pass runs. The agency wires
-    that input by adding a `pipeline_slots` row pointing to its own
-    output asset; the orchestrator resolves "latest at run start" so
-    the first run sees an empty previous output.
+        # Carry in-progress cancellations across runs
+        expire_cancellations = ExpireCancelledTrips(
+            previous_output_input="previous_trip_updates",
+        )
+        ```
     """
+
+    category = "Schedule-aware"
 
     description = "Drop stale cancellations; optionally carry forward in-progress ones"
 
@@ -361,7 +483,7 @@ class ExpireCancelledTrips(Step):
         if not durations:
             return
         now_s, _, _ = _now_seconds_for_schedule(
-            schedule, self._now, self._threshold_hour
+            schedule, self._now or ctx.now, self._threshold_hour
         )
 
         # Step 1: optionally merge in CANCELED entities from previous output.
@@ -410,20 +532,38 @@ class ExpireCancelledTrips(Step):
 
 
 class InsertMissingCancellations(Step):
-    """Emit cancellations for scheduled-but-missing trips after a grace delay.
+    """Cancel scheduled trips that should be running but are absent from the feed.
 
-    For every trip whose `service_id` is active
-    today per `calendar.txt` / `calendar_dates.txt`, if (a) the scheduled
-    start has passed by at least `delay_seconds`, (b) the scheduled end
-    is still in the future, and (c) no entity in the target feed
-    references the trip (checked across both `trip_update.trip.trip_id`
-    and `vehicle.trip.trip_id`), append a CANCELED `TripUpdate`
-    populated with `trip_id`, `route_id`, `start_date`, and
-    `schedule_relationship`. Entity ID is `cancel_<trip_id>`.
+    For every trip whose service is active today per `calendar.txt` and
+    `calendar_dates.txt`: if its scheduled start passed at least
+    `delay_seconds` ago, its scheduled end is still ahead, and no entity in
+    the target feed references it (on `trip_update.trip.trip_id` or
+    `vehicle.trip.trip_id`), a `CANCELED` trip update is appended with
+    `trip_id`, `route_id`, `start_date` and `schedule_relationship`, under
+    entity id `cancel_<trip_id>`. Time is resolved in the agency's local
+    timezone from `agency.txt`.
 
-    Time is resolved in the agency's local timezone via `agency.txt` —
-    see the module-level note.
+    Args:
+        target: The feed to operate on.
+        schedule_input: The `gtfs_schedule_zip` input the trips are read
+            from, as declared in the pipeline's `INPUTS` manifest.
+        delay_seconds: How long after its scheduled start a missing trip
+            is tolerated before it is cancelled.
+        service_day_threshold_hour: Local hour at which the service day
+            rolls over.
+        now: The evaluation moment. Defaults to `ctx.now`; set only in
+            tests.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
+
+    Examples:
+        ```python
+        insert_cancellations = InsertMissingCancellations(delay_seconds=600)
+        ```
     """
+
+    category = "Schedule-aware"
 
     description = "Insert cancellations for scheduled-but-missing trips"
 
@@ -452,7 +592,7 @@ class InsertMissingCancellations(Step):
         if not isinstance(schedule, Mapping):
             return
         now_s, service_start, _ = _now_seconds_for_schedule(
-            schedule, self._now, self._threshold_hour
+            schedule, self._now or ctx.now, self._threshold_hour
         )
         threshold = now_s - self._delay_seconds
 
@@ -510,37 +650,37 @@ def _trip_descriptors(entity: gtfs_rt.FeedEntity) -> Iterator[gtfs_rt.TripDescri
 
 
 class ConvertScheduledToNew(Step):
-    """Rewrite SCHEDULED entities to ADDED, generating new unique trip_ids.
+    """Rewrite `SCHEDULED` trips as `ADDED` with fresh trip ids.
 
-    Supports an "unpublished mode" where SCHEDULED trips are
-    republished as NEW/ADDED trips. For any entity whose
-    `trip.schedule_relationship == SCHEDULED` and whose `trip_id` is
-    present in the schedule, this step:
+    For every entity whose `trip.schedule_relationship` is `SCHEDULED` and
+    whose `trip_id` is in the schedule: the trip id is replaced with
+    `<prefix><original>_<uuid8>`, the relationship becomes `ADDED`, and
+    `route_id` and `direction_id` are filled from `trips.txt` when present.
+    Downstream consumers then treat the trip as added rather than as a
+    known scheduled trip, which is the point: it breaks the identity link
+    to a schedule the agency has not published yet. `stop_time_update` is
+    left as is; a pipeline that needs it filled from `stop_times.txt`
+    layers its own step.
 
-    1. Replaces `trip.trip_id` with a freshly generated unique value
-       (`<prefix><original>_<uuid8>`), so downstream consumers treat
-       the trip as added rather than a known scheduled trip.
-    2. Sets `trip.schedule_relationship = ADDED` (GTFS-RT's
-       enum-equivalent of "NEW" — the test case wording predates the
-       GTFS-RT v2 enum name).
-    3. Fills `route_id` and `direction_id` from the schedule's
-       `trips.txt` row when available — the GTFS-RT spec recommends
-       both on ADDED entities.
+    Args:
+        schedule_input: The `gtfs_schedule_zip` input the trips are read
+            from, as declared in the pipeline's `INPUTS` manifest.
+        trip_id_prefix: Prefix of the generated trip ids.
+        route_ids: Convert only trips scheduled on these routes (per
+            `route_id` in `trips.txt`); a trip on another route, or with no
+            `route_id` in the schedule, stays `SCHEDULED`. `None` converts
+            every scheduled trip in the schedule.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
 
-    Stop sequence and other recommended ADDED fields are intentionally
-    left untouched in v1 — the transform's role is to break the
-    consumer's identity link to the published schedule. Agencies that
-    need to also fill `stop_time_update` from `stop_times.txt` can
-    layer a separate step.
-
-    Optional route scoping
-    ----------------------
-    Set `route_ids` to restrict conversion to trips scheduled on those
-    routes (per the trip's `route_id` in `trips.txt`). Entities whose
-    trip is on a route not in the set — or whose trip has no `route_id`
-    in the schedule — are left as SCHEDULED. When `route_ids` is None
-    (default) every scheduled trip present in the schedule is converted.
+    Examples:
+        ```python
+        unpublished_mode = ConvertScheduledToNew(route_ids={"ROUTE_A"})
+        ```
     """
+
+    category = "Schedule-aware"
 
     description = "Convert SCHEDULED entities to ADDED with new trip_ids"
 
