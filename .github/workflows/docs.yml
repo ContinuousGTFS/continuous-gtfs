@@ -1,0 +1,81 @@
+name: Docs
+
+# The strict build gates pull requests that touch any source of the site
+# (a broken link, a page missing from mkdocs.yml's nav, or a generator error
+# fails before merge). The Pages deploy runs only for main, which carries the
+# released package, so the published reference matches what PyPI ships.
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'src/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.tool-versions'
+      - '.github/actions/setup-asdf/**'
+      - '.github/workflows/docs.yml'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read   # configure-pages reads the site settings
+    env:
+      # Silence the theme's and plugins' upgrade banners; they are not build
+      # warnings and only bury the real output.
+      NO_MKDOCS_2_WARNING: '1'
+      DISABLE_MKDOCS_2_WARNING: 'true'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-asdf
+
+      # The Reference section is rendered from the package's docstrings and
+      # its CLI parser, so the build runs in the project environment with the
+      # docs toolchain pinned in uv.lock's `docs` group.
+      - name: Build docs
+        run: uv run --frozen --group docs mkdocs build --strict
+
+      # Reads the repository's Pages settings; it does not change them
+      # (enablement stays off), so the deploy fails loudly until Pages is
+      # switched to "GitHub Actions" in the repository settings.
+      - name: Configure Pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@v6
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    # Serialize Pages deployments without cancelling one in flight.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
