@@ -6,10 +6,8 @@ page opens with a menu, then one section per category holding a tightly
 scoped mkdocstrings directive per builtin plus a findings table, then the
 helper types. Nothing under `docs/` is its source.
 
-A package that declares no `CATEGORIES` at all renders its builtins in one
-"Builtins" section, in declaration order. A package that declares categories
-but leaves a builtin out of them renders that builtin under "Uncategorized"
-with the gap called out.
+A package without `CATEGORIES` fails the build. A builtin whose category is
+missing or not listed renders under "Uncategorized" with the gap called out.
 """
 
 from __future__ import annotations
@@ -18,6 +16,7 @@ import importlib
 import inspect
 
 from mkdocs.config.defaults import MkDocsConfig
+from mkdocs.exceptions import PluginError
 from mkdocs.plugins import event_priority
 from mkdocs.structure.files import File, Files
 
@@ -82,7 +81,7 @@ def _directive(path: str) -> str:
 def _sections(mod, builtins: list) -> list[tuple[str, list]]:
     categories = getattr(mod, "CATEGORIES", None)
     if not categories:
-        return [("Builtins", builtins)] if builtins else []
+        raise PluginError(f"{mod.__name__} declares no CATEGORIES")
     by_category: dict[str, list] = {c: [] for c in categories}
     uncategorized = []
     for name, cls in builtins:

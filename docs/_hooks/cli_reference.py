@@ -4,52 +4,17 @@ The `continuous-gtfs` CLI page is rendered from the parser itself, so every
 subcommand and option shows with the help text and default the command
 actually carries. `docs/guide/cli.md` stays the hand-written narrative.
 
-The parser comes from `continuous_gtfs.cli.build_parser()`. A package that
-predates that factory builds its parser inside `main()`; the hook then runs
-`main()` with `parse_args` intercepted, takes the parser it was about to
-parse with, and stops before any command runs.
+The parser comes from `continuous_gtfs.cli.build_parser()`.
 """
 
 from __future__ import annotations
 
 import argparse
-import sys
 
 from mkdocs.config.defaults import MkDocsConfig
 from mkdocs.structure.files import File, Files
 
 PAGE_URI = "reference/cli.md"
-
-
-class _Captured(Exception):
-    def __init__(self, parser: argparse.ArgumentParser) -> None:
-        super().__init__("parser captured")
-        self.parser = parser
-
-
-def _build_parser() -> argparse.ArgumentParser:
-    from continuous_gtfs import cli
-
-    factory = getattr(cli, "build_parser", None)
-    if factory is not None:
-        return factory()
-
-    original = argparse.ArgumentParser.parse_args
-
-    def _capture(self, *args, **kwargs):
-        raise _Captured(self)
-
-    argparse.ArgumentParser.parse_args = _capture
-    saved_argv = sys.argv
-    sys.argv = ["continuous-gtfs"]
-    try:
-        cli.main()
-    except _Captured as captured:
-        return captured.parser
-    finally:
-        argparse.ArgumentParser.parse_args = original
-        sys.argv = saved_argv
-    raise RuntimeError("continuous_gtfs.cli.main() returned without parsing")
 
 
 def _help(action: argparse.Action) -> str:
@@ -108,7 +73,9 @@ def _subcommand_section(name: str, sub: argparse.ArgumentParser, summary: str) -
 
 
 def _render() -> str:
-    parser = _build_parser()
+    from continuous_gtfs.cli import build_parser
+
+    parser = build_parser()
     subparsers = next(
         a for a in parser._actions if isinstance(a, argparse._SubParsersAction)
     )

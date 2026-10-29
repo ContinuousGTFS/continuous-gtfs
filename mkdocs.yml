@@ -12,6 +12,7 @@ theme:
     primary: blue grey
   features:
     - content.code.copy
+    - content.action.edit
     - navigation.sections
 
 hooks:
@@ -57,6 +58,9 @@ plugins:
             merge_init_into_class: true
             docstring_section_style: table
 
+validation:
+  anchors: warn
+
 markdown_extensions:
   - pymdownx.highlight
   - pymdownx.superfences
@@ -72,7 +76,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - The author's job: jobs/make-a-change.md
+  - Making a change: jobs/make-a-change.md
   - Guide:
     - Getting Started: guide/index.md
     - Concepts: guide/concepts.md
