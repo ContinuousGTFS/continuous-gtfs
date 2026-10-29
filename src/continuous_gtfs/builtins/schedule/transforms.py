@@ -37,7 +37,7 @@ class MatchCondition:
 
     Examples:
         ```python
-        MatchCondition("route_id", value="ROUTE_B")
+        MatchCondition("route_id", value="R2")
         MatchCondition("service_id", regex=r"^RAIL")
         ```
     """
@@ -179,9 +179,9 @@ class RemoveRows(Step):
         remove_station_family = RemoveRows(
             "stops.txt",
             [
-                [MatchCondition("stop_id", value="STN_1")],
-                [MatchCondition("stop_id", value="STN_1-T1")],
-                [MatchCondition("stop_id", value="STN_1-T2")],
+                [MatchCondition("stop_id", value="S100")],
+                [MatchCondition("stop_id", value="S100-T1")],
+                [MatchCondition("stop_id", value="S100-T2")],
             ],
         )
 
@@ -256,13 +256,13 @@ class UpdateFields(Step):
         ```python
         update_route = UpdateFields(
             "routes.txt",
-            [MatchCondition("route_id", value="ROUTE_A")],
+            [MatchCondition("route_id", value="R1")],
             {
                 "route_long_name": "Northside - Downtown",
                 "route_color": "007CAD",
                 "route_text_color": "FFFFFF",
             },
-            description="Update route A metadata",
+            description="Update route R1 metadata",
         )
         ```
     """

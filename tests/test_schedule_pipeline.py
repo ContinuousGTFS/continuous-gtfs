@@ -57,7 +57,7 @@ def test_remove_rows_regex():
         "calendar.txt",
         [MatchCondition("service_id", regex=r"^XLR.*")],
     )
-    step.name = "remove_llr"
+    step.name = "remove_rail"
     step.apply(ctx)
 
     result = ctx.output["calendar.txt"]
@@ -342,7 +342,7 @@ def test_remove_rows_missing_column():
 def _stops_ctx() -> PipelineContext:
     df = pl.DataFrame(
         {
-            "stop_id": ["N13", "N13-T1", "N13-T2", "C05"],
+            "stop_id": ["S200", "S200-T1", "S200-T2", "C05"],
             "kind": ["station", "platform", "platform", "station"],
         }
     )
@@ -351,14 +351,14 @@ def _stops_ctx() -> PipelineContext:
 
 def test_remove_rows_any_of_groups_collapses_repeated_steps():
     # An agency pipeline can burn a separate step per stop id; any_of groups
-    # collapse N13 / N13-T1 / N13-T2 into one.
+    # collapse S200 / S200-T1 / S200-T2 into one.
     ctx = _stops_ctx()
     step = RemoveRows(
         "stops.txt",
         [
-            [MatchCondition("stop_id", value="N13")],
-            [MatchCondition("stop_id", value="N13-T1")],
-            [MatchCondition("stop_id", value="N13-T2")],
+            [MatchCondition("stop_id", value="S200")],
+            [MatchCondition("stop_id", value="S200-T1")],
+            [MatchCondition("stop_id", value="S200-T2")],
         ],
     )
     step.name = "remove_n13_family"
@@ -369,14 +369,14 @@ def test_remove_rows_any_of_groups_collapses_repeated_steps():
 
 
 def test_remove_rows_groups_express_and_within_or_across():
-    # (kind == platform AND stop_id ~ ^N13) OR (stop_id == C05)
+    # (kind == platform AND stop_id ~ ^S200) OR (stop_id == C05)
     ctx = _stops_ctx()
     step = RemoveRows(
         "stops.txt",
         [
             [
                 MatchCondition("kind", value="platform"),
-                MatchCondition("stop_id", regex=r"^N13"),
+                MatchCondition("stop_id", regex=r"^S200"),
             ],
             [MatchCondition("stop_id", value="C05")],
         ],
@@ -384,24 +384,24 @@ def test_remove_rows_groups_express_and_within_or_across():
     step.name = "remove_mixed"
     step.apply(ctx)
 
-    # N13 survives: it matches only one condition of the first group.
-    assert ctx.output["stops.txt"]["stop_id"].to_list() == ["N13"]
+    # S200 survives: it matches only one condition of the first group.
+    assert ctx.output["stops.txt"]["stop_id"].to_list() == ["S200"]
 
 
 def test_remove_rows_flat_list_is_still_all_of():
-    # A flat list ANDs; if it OR'd, N13 (a station) would also go.
+    # A flat list ANDs; if it OR'd, S200 (a station) would also go.
     ctx = _stops_ctx()
     step = RemoveRows(
         "stops.txt",
         [
             MatchCondition("kind", value="platform"),
-            MatchCondition("stop_id", value="N13-T1"),
+            MatchCondition("stop_id", value="S200-T1"),
         ],
     )
     step.name = "remove_flat"
     step.apply(ctx)
 
-    assert ctx.output["stops.txt"]["stop_id"].to_list() == ["N13", "N13-T2", "C05"]
+    assert ctx.output["stops.txt"]["stop_id"].to_list() == ["S200", "S200-T2", "C05"]
 
 
 def test_update_fields_any_of_groups():
@@ -409,7 +409,7 @@ def test_update_fields_any_of_groups():
     step = UpdateFields(
         "stops.txt",
         [
-            [MatchCondition("stop_id", value="N13-T1")],
+            [MatchCondition("stop_id", value="S200-T1")],
             [MatchCondition("stop_id", value="C05")],
         ],
         {"kind": "renamed"},
@@ -427,8 +427,8 @@ def test_clear_field_any_of_groups():
         "stops.txt",
         "kind",
         [
-            [MatchCondition("stop_id", value="N13")],
-            [MatchCondition("stop_id", value="N13-T2")],
+            [MatchCondition("stop_id", value="S200")],
+            [MatchCondition("stop_id", value="S200-T2")],
         ],
     )
     step.name = "clear_groups"
@@ -439,7 +439,7 @@ def test_clear_field_any_of_groups():
 
 
 def test_single_condition_flat_and_grouped_agree():
-    cond = MatchCondition("stop_id", value="N13-T1")
+    cond = MatchCondition("stop_id", value="S200-T1")
 
     flat_ctx = _stops_ctx()
     flat = RemoveRows("stops.txt", [cond])
@@ -461,15 +461,15 @@ def test_remove_rows_groups_respect_exclude():
     step = RemoveRows(
         "stops.txt",
         [
-            [MatchCondition("stop_id", value="N13")],
-            [MatchCondition("stop_id", value="N13-T1")],
+            [MatchCondition("stop_id", value="S200")],
+            [MatchCondition("stop_id", value="S200-T1")],
         ],
-        exclude=[[MatchCondition("stop_id", value="N13-T1")]],
+        exclude=[[MatchCondition("stop_id", value="S200-T1")]],
     )
     step.name = "remove_with_exclude_groups"
     step.apply(ctx)
 
-    assert ctx.output["stops.txt"]["stop_id"].to_list() == ["N13-T1", "N13-T2", "C05"]
+    assert ctx.output["stops.txt"]["stop_id"].to_list() == ["S200-T1", "S200-T2", "C05"]
 
 
 @pytest.mark.parametrize(
@@ -489,7 +489,7 @@ def test_missing_column_warns_and_leaves_file_untouched(make_step):
     # Counterfactual first: with the column present the step changes the
     # file and emits nothing, so the assertions below cannot pass vacuously.
     live_ctx = _stops_ctx()
-    live = make_step([MatchCondition("stop_id", value="N13")])
+    live = make_step([MatchCondition("stop_id", value="S200")])
     live.name = "live"
     live.apply(live_ctx)
     assert not live_ctx.output["stops.txt"].equals(_stops_ctx().output["stops.txt"])
@@ -499,7 +499,7 @@ def test_missing_column_warns_and_leaves_file_untouched(make_step):
     before = ctx.output["stops.txt"].clone()
     step = make_step(
         [
-            [MatchCondition("stop_id", value="N13")],
+            [MatchCondition("stop_id", value="S200")],
             [MatchCondition("zone_id", value="1")],
         ]
     )
@@ -522,7 +522,7 @@ def test_missing_column_in_exclude_warns_and_leaves_file_untouched():
     before = ctx.output["stops.txt"].clone()
     step = RemoveRows(
         "stops.txt",
-        [MatchCondition("stop_id", value="N13")],
+        [MatchCondition("stop_id", value="S200")],
         exclude=[[MatchCondition("zone_id", value="1")]],
     )
     step.name = "typo_exclude"
@@ -569,14 +569,14 @@ def test_mixed_condition_shapes_are_rejected_at_construction():
         RemoveRows(
             "stops.txt",
             [
-                MatchCondition("stop_id", value="N13"),
+                MatchCondition("stop_id", value="S200"),
                 [MatchCondition("kind", value="x")],
             ],  # type: ignore[list-item]
         )
     with pytest.raises(ValueError, match="empty group"):
-        UpdateFields("stops.txt", [[MatchCondition("stop_id", value="N13")], []], {})
+        UpdateFields("stops.txt", [[MatchCondition("stop_id", value="S200")], []], {})
     with pytest.raises(ValueError, match="exclude"):
-        RemoveRows("stops.txt", [MatchCondition("stop_id", value="N13")], exclude=[[]])
+        RemoveRows("stops.txt", [MatchCondition("stop_id", value="S200")], exclude=[[]])
 
 
 # --- SortRows (specs/transform-framework.md §Sort) ---
@@ -962,8 +962,8 @@ def _demo_fixture_zip_bytes() -> bytes:
         ),
         "stops.txt": (
             "stop_id,stop_name,stop_desc,stop_lat,stop_lon\n"
-            "E01,Expansion One,,38.0,-90.0\n"
-            "E07,Expansion Seven,,38.1,-90.1\n"
+            "S100,Expansion One,,38.0,-90.0\n"
+            "S107,Expansion Seven,,38.1,-90.1\n"
             "455,Old Town,Old Town to Lakeside,38.6,-90.3\n"
             "565,Old Town,Old Town to Midtown,38.6,-90.3\n"
             "C05,Old Town,,38.6,-90.3\n"

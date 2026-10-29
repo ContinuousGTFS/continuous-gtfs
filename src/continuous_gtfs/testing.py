@@ -54,7 +54,7 @@ def gtfs_df(csv: str) -> pl.DataFrame:
     """Parse a CSV string into an all-text polars DataFrame.
 
     GTFS columns are text — a ``route_type`` of ``3`` and a ``stop_id`` of
-    ``E01`` are both strings. :class:`~continuous_gtfs.builtins.schedule.MatchCondition`
+    ``S1`` are both strings. :class:`~continuous_gtfs.builtins.schedule.MatchCondition`
     compares against string values. Forcing every column to ``Utf8``
     (``infer_schema_length=0``) keeps fixtures faithful to how the worker
     parses a real feed — otherwise polars would infer ``0``/``1``
@@ -239,7 +239,7 @@ def assert_unchanged(
         assert_unchanged(
             before,
             ctx.output["stops.txt"],
-            excluding=pl.col("stop_id").is_in(["E01", "E07"]),
+            excluding=pl.col("stop_id").is_in(["S100", "S107"]),
         )
 
     Both frames are filtered to ``~excluding`` and sorted by all columns before

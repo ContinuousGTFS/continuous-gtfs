@@ -223,9 +223,9 @@ def test_filter_stops_by_id_requires_set_or_regex():
 
 
 def test_filter_stops_by_id_regex_matches_prefix_variants():
-    """A regex like `^E01(-|$)` filters the bare ID and all child-platform variants."""
-    feed = _make_tu_feed("T1", ["E01", "E01-T1", "E01-NB", "E02", "E010"])
-    step = FilterStopsByID(blocked_stop_id_regex=r"^E01(-|$)")
+    """A regex like `^S100(-|$)` filters the bare ID and all child-platform variants."""
+    feed = _make_tu_feed("T1", ["S100", "S100-T1", "S100-NB", "S102", "S1000"])
+    step = FilterStopsByID(blocked_stop_id_regex=r"^S100(-|$)")
     step.name = "filter"
     ctx = PipelineContext(output={"trip_updates": feed})
     step.apply(ctx)
@@ -234,15 +234,15 @@ def test_filter_stops_by_id_regex_matches_prefix_variants():
         stu.stop_id
         for stu in ctx.output["trip_updates"].entity[0].trip_update.stop_time_update
     ]
-    assert surviving == ["E02", "E010"]
+    assert surviving == ["S102", "S1000"]
 
 
 def test_filter_stops_by_id_regex_clears_vp_status():
     """Regex match on VehiclePosition.stop_id clears the VehicleStopStatus trio."""
     feed = _make_test_feed()
-    feed.entity[1].vehicle.stop_id = "E01-T1"
+    feed.entity[1].vehicle.stop_id = "S100-T1"
     feed.entity[1].vehicle.current_status = gtfs_rt.VehiclePosition.STOPPED_AT
-    step = FilterStopsByID(blocked_stop_id_regex=r"^E01")
+    step = FilterStopsByID(blocked_stop_id_regex=r"^S100")
     step.name = "filter"
     ctx = PipelineContext(output={"vehicle_positions": feed})
     step.apply(ctx)
@@ -255,10 +255,10 @@ def test_filter_stops_by_id_regex_clears_vp_status():
 
 def test_filter_stops_by_id_set_and_regex_union():
     """Supplying both unions the matches; either source can drop a stop."""
-    feed = _make_tu_feed("T1", ["E01", "X99", "E01-T1", "Y22"])
+    feed = _make_tu_feed("T1", ["S100", "X99", "S100-T1", "Y22"])
     step = FilterStopsByID(
         blocked_stop_ids={"X99"},
-        blocked_stop_id_regex=r"^E01",
+        blocked_stop_id_regex=r"^S100",
     )
     step.name = "filter"
     ctx = PipelineContext(output={"trip_updates": feed})
@@ -275,15 +275,15 @@ def test_filter_stops_by_id_description_reflects_inputs():
     """Description includes set size and/or regex pattern
     depending on what's configured."""
     assert (
-        FilterStopsByID(blocked_stop_ids={"E01", "E07"}).description
+        FilterStopsByID(blocked_stop_ids={"S100", "S107"}).description
         == "Filter 2 blocked stops"
     )
     assert (
-        FilterStopsByID(blocked_stop_id_regex=r"^E01").description
-        == "Filter regex '^E01'"
+        FilterStopsByID(blocked_stop_id_regex=r"^S100").description
+        == "Filter regex '^S100'"
     )
-    s = FilterStopsByID(blocked_stop_ids={"X"}, blocked_stop_id_regex=r"^E01")
-    assert s.description == "Filter 1 blocked stops + regex '^E01'"
+    s = FilterStopsByID(blocked_stop_ids={"X"}, blocked_stop_id_regex=r"^S100")
+    assert s.description == "Filter 1 blocked stops + regex '^S100'"
 
 
 def test_rename_vehicles():

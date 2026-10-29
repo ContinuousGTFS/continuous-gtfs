@@ -58,9 +58,9 @@ def test_decorator_sets_source_hash():
 
 
 def test_identical_builtins_hash_the_same_and_different_conditions_differ():
-    a = RemoveRows("stops.txt", [MatchCondition("stop_id", value="N13")])
-    b = RemoveRows("stops.txt", [MatchCondition("stop_id", value="N13")])
-    c = RemoveRows("stops.txt", [MatchCondition("stop_id", value="N14")])
+    a = RemoveRows("stops.txt", [MatchCondition("stop_id", value="S200")])
+    b = RemoveRows("stops.txt", [MatchCondition("stop_id", value="S200")])
+    c = RemoveRows("stops.txt", [MatchCondition("stop_id", value="S201")])
     a.name, b.name = "first", "second"
     assert definition_hash(a) == definition_hash(b)
     assert definition_hash(a) != definition_hash(c)
@@ -68,10 +68,10 @@ def test_identical_builtins_hash_the_same_and_different_conditions_differ():
 
 def test_builtin_description_is_part_of_the_definition():
     a = RemoveRows(
-        "stops.txt", [MatchCondition("stop_id", value="N13")], description="x"
+        "stops.txt", [MatchCondition("stop_id", value="S200")], description="x"
     )
     b = RemoveRows(
-        "stops.txt", [MatchCondition("stop_id", value="N13")], description="y"
+        "stops.txt", [MatchCondition("stop_id", value="S200")], description="y"
     )
     assert definition_hash(a) != definition_hash(b)
 
@@ -284,7 +284,7 @@ def test_a_step_functions_source_is_exactly_the_text_its_hash_hashes():
 
 
 def test_a_builtins_source_compacts_to_exactly_the_hashed_payload():
-    a = RemoveRows("stops.txt", [MatchCondition("stop_id", value="N13")])
+    a = RemoveRows("stops.txt", [MatchCondition("stop_id", value="S200")])
     from continuous_gtfs.step import definition_text
 
     text = definition_text(a)
@@ -292,25 +292,25 @@ def test_a_builtins_source_compacts_to_exactly_the_hashed_payload():
     assert _sha(compact) == definition_hash(a)
     # One key per line, so a changed parameter diffs as its own line.
     assert len(text.splitlines()) > 3
-    assert '"value": "N13"' in text
+    assert '"value": "S200"' in text
 
 
 def test_builtin_definition_text_is_canonical():
     from continuous_gtfs.step import definition_text
 
-    a = RemoveRows("stops.txt", [MatchCondition("stop_id", value="N13")])
-    b = RemoveRows("stops.txt", [MatchCondition("stop_id", value="N13")])
-    c = RemoveRows("stops.txt", [MatchCondition("stop_id", value="N14")])
+    a = RemoveRows("stops.txt", [MatchCondition("stop_id", value="S200")])
+    b = RemoveRows("stops.txt", [MatchCondition("stop_id", value="S200")])
+    c = RemoveRows("stops.txt", [MatchCondition("stop_id", value="S201")])
     a.name, b.name = "first", "second"
     assert definition_text(a) == definition_text(b)
     assert definition_text(a) != definition_text(c)
     # Only the changed parameter's line differs.
     diff = set(definition_text(a).splitlines()) ^ set(definition_text(c).splitlines())
-    assert diff == {'        "value": "N13"', '        "value": "N14"'}
+    assert diff == {'        "value": "S200"', '        "value": "S201"'}
 
 
 def test_the_texts_are_never_part_of_a_definition():
-    a = RemoveRows("stops.txt", [MatchCondition("stop_id", value="N13")])
+    a = RemoveRows("stops.txt", [MatchCondition("stop_id", value="S200")])
     before = definition_hash(a)
     a.source = "anything"
     a.module_source = "anything else"

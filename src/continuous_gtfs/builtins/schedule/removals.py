@@ -429,10 +429,10 @@ class RemoveStops(_SemanticRemoval):
     Examples:
         ```python
         # The whole station: platforms, entrances, and everything under it
-        remove_station = RemoveStops(ids=["STN_1"])
+        remove_station = RemoveStops(ids=["S100"])
 
         # Demote the station instead: platforms stay, entrances go
-        detach_station = RemoveStops(ids=["STN_1"], children="detach")
+        detach_station = RemoveStops(ids=["S100"], children="detach")
         ```
     """
 

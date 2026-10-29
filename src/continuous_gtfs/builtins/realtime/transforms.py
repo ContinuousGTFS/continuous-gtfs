@@ -107,7 +107,7 @@ class FilterStopsByID(Step):
 
     Examples:
         ```python
-        filter_stops = FilterStopsByID(blocked_stop_ids={"STN_8", "STN_9"})
+        filter_stops = FilterStopsByID(blocked_stop_ids={"S108", "S109"})
 
         filter_expansion = FilterStopsByID(blocked_stop_id_regex=r"^EXT_")
         ```
@@ -676,7 +676,7 @@ class ConvertScheduledToNew(Step):
 
     Examples:
         ```python
-        unpublished_mode = ConvertScheduledToNew(route_ids={"ROUTE_A"})
+        unpublished_mode = ConvertScheduledToNew(route_ids={"R1"})
         ```
     """
 

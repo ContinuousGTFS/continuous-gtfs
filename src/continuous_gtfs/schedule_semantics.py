@@ -331,10 +331,10 @@ def derive_semantics(tables: Mapping[str, pl.DataFrame]) -> dict[str, pl.DataFra
         and stop_times_txt.height > 0
         and {"trip_id", "stop_sequence", "stop_id"} <= set(stop_times_txt.columns)
     ):
-        st = stop_times_txt.with_columns(
+        ordered = stop_times_txt.with_columns(
             pl.col("stop_sequence").cast(pl.Int64, strict=False)
         ).sort(["trip_id", "stop_sequence"])
-        grouped = st.group_by("trip_id", maintain_order=True).agg(
+        grouped = ordered.group_by("trip_id", maintain_order=True).agg(
             [
                 pl.col("stop_id").alias("stop_ids"),
                 pl.col("arrival_time").alias("arrivals_raw"),
