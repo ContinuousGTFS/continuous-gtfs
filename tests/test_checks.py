@@ -19,6 +19,8 @@ from continuous_gtfs import (
     PipelineContext,
     Step,
     check,
+    dag_edges,
+    export_reactflow,
     resolve_dag,
     scan_pipeline,
     step,
@@ -845,6 +847,73 @@ def test_guard_is_off_by_default_and_on_with_the_env_var(monkeypatch):
     # An explicit False beats the env var (a library caller opting out).
     _, by_name = _guarded_run(check_guard=False)
     assert by_name["edits_stops"].findings == []
+
+
+def _predecessors(order: list[Step]) -> dict[str, list[str]]:
+    """Each step's direct predecessors per dag_edges, in resolved order."""
+    preds: dict[str, list[str]] = {s.name: [] for s in order}
+    for a, b in dag_edges(order):
+        if a.name not in preds[b.name]:
+            preds[b.name].append(a.name)
+    rank = {s.name: i for i, s in enumerate(order)}
+    return {k: sorted(v, key=rank.__getitem__) for k, v in preds.items()}
+
+
+def test_checks_carry_no_edges_in_the_dag_or_export():
+    @step(before="*")
+    def init(ctx):
+        pass
+
+    @step(after="*")
+    def finalize(ctx):
+        pass
+
+    @check()
+    def verify(ctx):
+        pass
+
+    order = resolve_dag(_named(init=init, finalize=finalize, verify=verify))
+    preds = _predecessors(order)
+    assert preds["verify"] == []
+    assert all("verify" not in (a.name, b.name) for a, b in dag_edges(order))
+    assert preds["finalize"] == ["init"]
+
+    rf = export_reactflow(order)
+    assert {n["id"]: n["role"] for n in rf["nodes"]} == {
+        "init": "transform",
+        "finalize": "transform",
+        "verify": "check",
+    }
+    assert all("verify" not in (e["source"], e["target"]) for e in rf["edges"])
+
+
+def test_dag_edges_keep_wildcard_semantics():
+    """Wildcards expand to an edge from (or to) every other transform; read
+    as direct predecessors, each step's set matches the resolved order."""
+
+    @step(before="*")
+    def init(ctx):
+        pass
+
+    @step()
+    def a(ctx):
+        pass
+
+    @step(after=[a])
+    def b(ctx):
+        pass
+
+    @step(after="*")
+    def fin(ctx):
+        pass
+
+    order = resolve_dag(_named(init=init, a=a, b=b, fin=fin))
+    assert _predecessors(order) == {
+        "init": [],
+        "a": ["init"],
+        "b": ["init", "a"],
+        "fin": ["init", "a", "b"],
+    }
 
 
 def test_cli_runs_enable_the_guard(tmp_path, monkeypatch, capsys):
