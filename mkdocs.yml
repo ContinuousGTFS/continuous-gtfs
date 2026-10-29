@@ -1,6 +1,6 @@
 site_name: Continuous GTFS SDK
 site_description: Define, test, and run GTFS data pipelines as Python steps
-site_url: https://continuousgtfs.github.io/continuous-gtfs/
+site_url: https://docs.continuousgtfs.com/
 repo_url: https://github.com/ContinuousGTFS/continuous-gtfs
 repo_name: ContinuousGTFS/continuous-gtfs
 edit_uri: edit/develop/docs/
@@ -19,19 +19,20 @@ hooks:
   - docs/_hooks/cli_reference.py
   - docs/_hooks/builtins.py
 
-# Hooks are build code, not pages. _redirects.md is the cutover map for the
-# pages that moved here from the platform docs site; it is a repo document,
-# not a page.
+# Hooks are build code, not pages.
 exclude_docs: |
   _hooks/
-  _redirects.md
 
 plugins:
   - search
   # A published URL is a promise: a page that moves ships its redirect in
-  # the same change, mapped here.
+  # the same change, mapped here. The two entries keep paths this site
+  # inherited with the docs.continuousgtfs.com domain, where they were
+  # already redirects.
   - redirects:
-      redirect_maps: {}
+      redirect_maps:
+        guide/builtins/schedule.md: reference/builtins-schedule.md
+        guide/builtins/realtime.md: reference/builtins-realtime.md
   - mkdocstrings:
       handlers:
         python:
