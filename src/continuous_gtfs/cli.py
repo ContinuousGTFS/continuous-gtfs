@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 _LEVEL_COLORS = {
@@ -82,10 +83,42 @@ def _install_logging_formatter(level: int | None = None) -> None:
         root.setLevel(level)
 
 
-def main() -> None:
-    _install_warning_formatter()
-    _install_logging_formatter()
+def _parse_now(value: str) -> datetime:
+    """argparse type for --now: an ISO 8601 moment with an explicit offset."""
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(
+            f"--now: {value!r} is not an ISO 8601 datetime"
+        ) from e
+    if moment.tzinfo is None:
+        raise argparse.ArgumentTypeError(
+            f"--now: {value!r} has no UTC offset — give one (e.g. "
+            "2026-09-21T01:30:00Z) so the evaluation moment is unambiguous"
+        )
+    return moment.astimezone(UTC)
 
+
+def _add_now_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--now",
+        type=_parse_now,
+        default=None,
+        metavar="ISO-8601",
+        help=(
+            "Evaluation moment the steps see as ctx.now (default: invocation "
+            "time). Use to re-evaluate a stored input as of its own moment."
+        ),
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """The `continuous-gtfs` command-line parser: every subcommand and option.
+
+    Built separately from `main()` so the docs site can render the CLI
+    reference from the parser itself (specs/documentation.md §Library
+    reference) and so tests can inspect the tree without parsing argv.
+    """
     parser = argparse.ArgumentParser(description="continuous-gtfs pipeline CLI")
     sub = parser.add_subparsers(dest="command")
 
@@ -96,6 +129,7 @@ def main() -> None:
     )
     sched.add_argument("-o", "--output", type=Path, help="Output zip file")
     sched.add_argument("--env", default="production", help="Environment name")
+    _add_now_argument(sched)
     sched.add_argument(
         "-v",
         "--verbose",
@@ -144,7 +178,9 @@ def main() -> None:
             "Supply a named input to the pipeline. NAME must be declared in "
             "the pipeline's INPUTS manifest; content_kind is resolved from the "
             "manifest by default, or overridden with an optional ':KIND' "
-            "suffix. Repeatable."
+            "suffix. A file_tree input also accepts a DIRECTORY, packed with "
+            "the platform's canonical packer (a .zip passes through as the "
+            "archive). Repeatable."
         ),
     )
     sched.add_argument(
@@ -260,6 +296,7 @@ def main() -> None:
         ),
     )
     rt.add_argument("--env", default="production", help="Environment name")
+    _add_now_argument(rt)
     rt.add_argument(
         "--input",
         action="append",
@@ -396,6 +433,15 @@ def main() -> None:
         "--json", action="store_true", help="Print per-verdict row counts as JSON"
     )
 
+    return parser
+
+
+def main() -> None:
+    """Entry point of the `continuous-gtfs` command: parse argv and dispatch."""
+    _install_warning_formatter()
+    _install_logging_formatter()
+
+    parser = build_parser()
     args = parser.parse_args()
 
     if args.command == "schedule":
@@ -426,7 +472,9 @@ def _run_schedule(args: argparse.Namespace) -> None:
     _warn_unknown_disabled_steps(prep.unknown_disabled_steps)
 
     executor = (
-        _build_verbose_cli_executor() if getattr(args, "verbose", False) else None
+        _build_verbose_cli_executor()
+        if getattr(args, "verbose", False)
+        else _cli_executor(fail_fast=False)
     )
     quick = getattr(args, "quick", False)
 
@@ -437,6 +485,7 @@ def _run_schedule(args: argparse.Namespace) -> None:
         executor=executor,
         quick=quick,
         disabled_steps=prep.disabled_steps,
+        now=args.now,
     )
 
     # --- Header ---
@@ -639,7 +688,7 @@ def _print_step_result(sr, steps) -> None:
     # Step kind and description
     kind = ""
     if step_obj:
-        kind = f" [{step_obj.builtin_name or '@step'}]"
+        kind = f" [{_step_kind_label(step_obj)}]"
         if step_obj.files:
             kind += f" {', '.join(step_obj.files)}"
 
@@ -659,6 +708,14 @@ def _print_step_result(sr, steps) -> None:
     # Log messages
     for entry in sr.logs:
         print(f"         [{entry['level']}] {entry['message']}")
+
+
+def _step_kind_label(step_obj) -> str:
+    """A step's kind as the CLI prints it: the builtin class, else the
+    decorator that declared it (@step / @check)."""
+    if step_obj.builtin_name:
+        return step_obj.builtin_name
+    return "@check" if step_obj.is_check else "@step"
 
 
 def _print_findings(exec_result) -> None:
@@ -730,7 +787,7 @@ def _prepare_run_or_exit(args: argparse.Namespace):
     from .prep import prepare_pipeline_run
 
     try:
-        return prepare_pipeline_run(
+        prep = prepare_pipeline_run(
             args.pipeline_dir,
             select=getattr(args, "select", None),
             inputs=getattr(args, "inputs", []),
@@ -739,6 +796,23 @@ def _prepare_run_or_exit(args: argparse.Namespace):
     except (ValueError, FileNotFoundError) as e:
         print(str(e), file=sys.stderr)
         sys.exit(2)
+    _warn_likely_checks(prep.steps)
+    return prep
+
+
+def _warn_likely_checks(steps) -> None:
+    """The local-run nudge toward @check (specs/transform-framework.md
+    §Checks): a @step that declares findings and lists no files is usually a
+    check. CLI only — worker startup stays quiet."""
+    from .scanner import likely_checks
+
+    for name in likely_checks(steps):
+        print(
+            f"warning: step {name} declares findings and operates on no files; "
+            "if it only reads the output and reports findings, declare it with "
+            "@check so it runs after every transform against a read-only view.",
+            file=sys.stderr,
+        )
 
 
 def _warn_unknown_disabled_steps(unknown: list[str]) -> None:
@@ -751,18 +825,26 @@ def _warn_unknown_disabled_steps(unknown: list[str]) -> None:
         )
 
 
+def _cli_executor(*, fail_fast: bool):
+    """A PipelineExecutor for a local run: the check guard is always on, so a
+    check that changes its view is reported in the dev loop
+    (specs/transform-framework.md §Dev-time mutation detection)."""
+    from .executor import PipelineExecutor
+
+    return PipelineExecutor(fail_fast=fail_fast, check_guard=True)
+
+
 def _build_verbose_cli_executor():
     """Build a PipelineExecutor whose `before_step` / `after_step` hooks
     stream per-step progress to stdout — the shape used by `--verbose`."""
     from .context import PipelineContext
-    from .executor import PipelineExecutor
     from .results import StepResult
     from .step import Step
 
-    executor = PipelineExecutor(fail_fast=False)
+    executor = _cli_executor(fail_fast=False)
 
     def _on_before_step(ctx: PipelineContext, step: Step) -> None:
-        kind = step.builtin_name or "@step"
+        kind = _step_kind_label(step)
         files = ", ".join(step.files) if step.files else ""
         desc = f" — {step.description.split(chr(10))[0]}" if step.description else ""
         print(f"    ▸ {step.name} [{kind}] {files}{desc}", flush=True)
@@ -781,7 +863,12 @@ def _build_verbose_cli_executor():
             if sr.status == "error"
             else "skip"
         )
-        print(f"      {sr.duration_ms:.1f}ms [{indicator}]{delta_str}", flush=True)
+        # Checks start together and finish in name order, so each result
+        # names its step rather than relying on adjacency to its start line.
+        print(
+            f"      {sr.name}: {sr.duration_ms:.1f}ms [{indicator}]{delta_str}",
+            flush=True,
+        )
         if sr.error:
             print(f"      ERROR: {sr.error}", flush=True)
         for entry in sr.logs:
@@ -1227,7 +1314,9 @@ def _run_realtime(args: argparse.Namespace) -> None:
         prep.inputs,
         prep.steps,
         environment=args.env,
+        executor=_cli_executor(fail_fast=True),
         disabled_steps=prep.disabled_steps,
+        now=args.now,
     )
 
     print(f"RT pipeline: {result.total_ms:.1f}ms")
@@ -1278,6 +1367,7 @@ def _show_dag(args: argparse.Namespace) -> None:
     from .scanner import dag_edges, export_reactflow, resolve_dag, scan_pipeline
 
     steps = resolve_dag(scan_pipeline(args.pipeline_dir))
+    _warn_likely_checks(steps)
 
     if args.json:
         rf = export_reactflow(steps)
@@ -1298,6 +1388,8 @@ def _show_dag(args: argparse.Namespace) -> None:
         print(f"DAG: {len(steps)} steps")
         for i, s in enumerate(steps):
             kind = "builtin" if s.is_builtin else "custom"
+            if s.is_check:
+                kind += ", check"
             deps = (
                 "*" if s.after == "*" else ", ".join(d.name for d in s.after if d.name)
             )
@@ -1475,5 +1567,3 @@ def _run_pair_trips(args: argparse.Namespace) -> None:
             print(f"  Written to {args.output}")
         else:
             print(f"  {args.output}: pair already present, skipped (skip-if-exists)")
-
-

@@ -25,6 +25,9 @@ class StepResult:
     #: part (specs/issues.md §Crash capture). Both are reported; the platform
     #: chooses which to group on.
     error_type: str | None = None
+    #: "transform" or "check" (specs/transform-framework.md §Checks). A
+    #: check's failure never fails the run — see ExecutionResult.success.
+    role: str = "transform"
     logs: list[dict] = field(default_factory=list)
     metadata: dict | None = None
     #: Findings the step emitted, drained from the context by the executor
@@ -41,4 +44,10 @@ class ExecutionResult:
 
     @property
     def success(self) -> bool:
-        return all(r.status in ("success", "skipped") for r in self.steps)
+        """Whether every transform succeeded or was skipped. Checks are not
+        read: a check failure never stops the run and never withholds the
+        artifact (specs/transform-framework.md §Checks phase) — it is
+        reported as a `check_failed` finding instead."""
+        return all(
+            r.status in ("success", "skipped") for r in self.steps if r.role != "check"
+        )

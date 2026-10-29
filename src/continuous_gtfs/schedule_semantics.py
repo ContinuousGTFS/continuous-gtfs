@@ -43,12 +43,13 @@ from __future__ import annotations
 import io
 import json
 from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 import blake3
 import polars as pl
 
+from .clock import system_now
 from .schedule_helpers import gtfs_time_to_seconds
 
 if TYPE_CHECKING:
@@ -330,10 +331,10 @@ def derive_semantics(tables: Mapping[str, pl.DataFrame]) -> dict[str, pl.DataFra
         and stop_times_txt.height > 0
         and {"trip_id", "stop_sequence", "stop_id"} <= set(stop_times_txt.columns)
     ):
-        st = stop_times_txt.with_columns(
+        ordered = stop_times_txt.with_columns(
             pl.col("stop_sequence").cast(pl.Int64, strict=False)
         ).sort(["trip_id", "stop_sequence"])
-        grouped = st.group_by("trip_id", maintain_order=True).agg(
+        grouped = ordered.group_by("trip_id", maintain_order=True).agg(
             [
                 pl.col("stop_id").alias("stop_ids"),
                 pl.col("arrival_time").alias("arrivals_raw"),
@@ -513,7 +514,7 @@ def write_semantics(
     metadata = {
         "feed_digest": feed_digest,
         "rev": SEMANTICS_REV,
-        "written_at": datetime.now(UTC).isoformat(),
+        "written_at": system_now().isoformat(),
         "row_counts": row_counts,
     }
     with filesystem.open(f"{version_dir}/metadata.json", "wb") as f:

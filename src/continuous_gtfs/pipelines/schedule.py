@@ -11,10 +11,14 @@ import logging
 import time
 import zipfile
 from dataclasses import dataclass, field
+from datetime import datetime
+from functools import partial
 from typing import Any
 
 import polars as pl
 
+from ..canonical_zip import pack_entries
+from ..clock import system_now
 from ..context import PipelineContext
 from ..executor import PipelineExecutor
 from ..results import ExecutionResult
@@ -49,6 +53,7 @@ def run_schedule_pipeline(
     executor: PipelineExecutor | None = None,
     quick: bool = False,
     disabled_steps: list[str] | None = None,
+    now: datetime | None = None,
 ) -> SchedulePipelineResult:
     """Run the full schedule pipeline against already-parsed inputs.
 
@@ -94,6 +99,7 @@ def run_schedule_pipeline(
         inputs=dict(inputs),
         output={},
         environment=environment,
+        now=now or system_now(),
     )
     t0 = time.perf_counter()
     exec_result = executor.execute(steps, ctx, disabled_steps=disabled_steps)
@@ -169,20 +175,31 @@ def extract_zip(zip_bytes: bytes) -> dict[str, pl.DataFrame]:
 
 
 def package_zip(datasets: dict[str, pl.DataFrame], *, compress: bool = True) -> bytes:
-    """Package datasets back into a GTFS zip.
+    """Package datasets back into a GTFS zip, byte-deterministically.
+
+    Identical tables always yield identical bytes (specs/asset-registry.md
+    §Output Assets): the canonical packer fixes entry order, timestamps,
+    attributes, and the compression level, so re-evaluating an unchanged
+    checkpoint repeats the latest output version instead of minting one.
 
     Args:
         datasets: filename -> DataFrame map.
-        compress: If True (default) use DEFLATE. If False, use ZIP_STORED
-            (no compression) — faster, used for --quick dev runs when the
-            zip is only produced for inspection, not for distribution.
+        compress: If True (default) use DEFLATE at the packer's pinned
+            level. If False, use STORE (no compression) — faster, used for
+            --quick dev runs when the zip is only produced for inspection,
+            not for distribution.
     """
+    # Each member's CSV is encoded only when the packer writes it, so peak
+    # memory holds one table's bytes beside the archive, not all of them.
+    return pack_entries(
+        ((filename, partial(_csv_bytes, df)) for filename, df in datasets.items()),
+        compress=compress,
+    )
+
+
+def _csv_bytes(df: pl.DataFrame) -> bytes:
     buf = io.BytesIO()
-    mode = zipfile.ZIP_DEFLATED if compress else zipfile.ZIP_STORED
-    with zipfile.ZipFile(buf, "w", mode) as zf:
-        for filename, df in sorted(datasets.items()):
-            csv_bytes = df.write_csv().encode("utf-8")
-            zf.writestr(filename, csv_bytes)
+    df.write_csv(buf)
     return buf.getvalue()
 
 

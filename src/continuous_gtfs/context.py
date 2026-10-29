@@ -5,8 +5,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
+
+from .clock import system_now
 
 if TYPE_CHECKING:
     from .step import Step
@@ -33,6 +36,8 @@ class PipelineContext:
               csv_table          → polars.DataFrame
               gtfs_rt_protobuf   → gtfs_realtime_pb2.FeedMessage
               opaque_bytes       → bytes
+              file_tree          → FileTree (read-only Traversable root;
+                                   see continuous_gtfs.file_tree)
             Transforms read ctx.inputs[name] by the name declared in the
             pipeline's INPUTS manifest.
 
@@ -66,6 +71,13 @@ class PipelineContext:
             additionally drains a per-step buffer into each
             StepResult.findings, which is what the worker transports. See
             specs/transform-framework.md §Findings.
+        now: The evaluation moment, tz-aware UTC — the clock every step
+            that reasons about time reads instead of the system clock.
+            The worker sets it from the dispatch's evaluated_at (receipt
+            time when absent), the CLI from --now (invocation time when
+            absent); constructed bare, it defaults to construction time.
+            A naive datetime is rejected. See
+            specs/transform-framework.md §PipelineContext.
     """
 
     inputs: Mapping[str, Any] = field(default_factory=dict)
@@ -75,8 +87,12 @@ class PipelineContext:
     metadata: dict[str, Any] = field(default_factory=dict)
     id_mappings: dict[str, dict[str, str | None]] = field(default_factory=dict)
     findings: list[dict[str, Any]] = field(default_factory=list)
+    now: datetime = field(default_factory=system_now)
 
     def __post_init__(self) -> None:
+        if self.now.tzinfo is None:
+            raise ValueError("PipelineContext.now must be a tz-aware datetime")
+        self.now = self.now.astimezone(UTC)
         # Per-step emission state. Plain attributes, not dataclass fields:
         # they are framework bookkeeping, never something a caller passes in.
         self._step_findings: list[dict[str, Any]] = []

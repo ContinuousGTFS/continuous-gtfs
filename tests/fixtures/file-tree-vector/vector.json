@@ -1,0 +1,12 @@
+{
+  "description": "Golden vector for the canonical tree packer (specs/asset-registry.md §Tree paths). The orchestrator (TypeScript) and pipeline (Python) packers must produce this archive byte-for-byte for these entries; each suite re-packs the files below and asserts the sha256 as a literal in its own test, so either packer drifting breaks its own CI. The tree deliberately includes a nested directory, an empty file, and names whose bytewise order ('a!' < 'a/' < 'a0') differs from a per-directory filesystem listing.",
+  "files": {
+    "README.md": "Z29sZGVuIHRyZWUgZml4dHVyZQo=",
+    "a!bang.txt": "YmFuZwo=",
+    "a/empty.bin": "",
+    "a/nested.txt": "bmVzdGVkCg==",
+    "a0.txt": "c29ydHMgYWZ0ZXIgdGhlIHNsYXNoCg=="
+  },
+  "encoding": "base64",
+  "sha256": "6f2849c7020529fac4cf6e9fdf6165c9399d80cf915f3bf15fb556544cbdc1c9"
+}

@@ -44,11 +44,12 @@ from __future__ import annotations
 import io
 import json
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 import polars as pl
 
+from .clock import system_now
 from .schedule_semantics import identity_key_of
 
 if TYPE_CHECKING:
@@ -406,7 +407,7 @@ def write_trip_pairs(
         "target_digest": target_digest,
         "candidate_digest": candidate_digest,
         "rev": PAIRING_REV,
-        "written_at": datetime.now(UTC).isoformat(),
+        "written_at": system_now().isoformat(),
         "row_count": pairs.height,
     }
     with filesystem.open(marker_path, "wb") as f:

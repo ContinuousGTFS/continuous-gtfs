@@ -40,7 +40,7 @@ remove_inactive_calendars = RemoveRows(
     description="Remove calendar records with no active service days",
 )
 
-remove_llr_calendar = RemoveRows(
+remove_rail_calendar = RemoveRows(
     "calendar.txt",
     [MatchCondition("service_id", regex=r"^XLR.*")],
     description="Remove XLR service IDs from calendar",
@@ -54,7 +54,7 @@ remove_tline_calendar = RemoveRows(
     after=[remove_inactive_calendars],
 )
 
-remove_llr_calendar_dates = RemoveRows(
+remove_rail_calendar_dates = RemoveRows(
     "calendar_dates.txt",
     [MatchCondition("service_id", regex=r"^XLR.*")],
     description="Remove XLR service IDs from calendar_dates",
@@ -70,14 +70,14 @@ remove_tline_calendar_dates = RemoveRows(
 
 remove_stop_e01 = RemoveRows(
     "stops.txt",
-    [MatchCondition("stop_id", value="E01")],
-    description="Remove non-revenue expansion stop E01",
+    [MatchCondition("stop_id", value="S100")],
+    description="Remove non-revenue expansion stop S100",
 )
 
 remove_stop_e07 = RemoveRows(
     "stops.txt",
-    [MatchCondition("stop_id", value="E07")],
-    description="Remove non-revenue expansion stop E07",
+    [MatchCondition("stop_id", value="S107")],
+    description="Remove non-revenue expansion stop S107",
 )
 
 # --- Route metadata updates ---

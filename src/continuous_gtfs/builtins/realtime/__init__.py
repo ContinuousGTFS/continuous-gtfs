@@ -12,6 +12,17 @@ from .transforms import (
     UpdateFeedHeader,
 )
 
+#: Catalog sections in display order (specs/transform-framework.md §The
+#: builtin catalog). Every builtin here names one as its `category`.
+CATEGORIES = (
+    "Filtering",
+    "Merging",
+    "Identifiers",
+    "Schedule-aware",
+    "Feed header",
+    "Testing",
+)
+
 __all__ = [
     "PassThrough",
     "FilterStopsByID",

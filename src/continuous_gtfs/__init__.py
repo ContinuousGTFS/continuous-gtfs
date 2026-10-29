@@ -5,11 +5,13 @@ from .executor import execute_pipeline
 from .prep import PreparedRun, load_inputs, prepare_pipeline_run
 from .results import ExecutionResult, StepResult
 from .scanner import dag_edges, export_reactflow, resolve_dag, scan_pipeline
-from .step import Step, step
+from .step import Check, Step, check, step
 
 __all__ = [
     "Step",
     "step",
+    "Check",
+    "check",
     "PipelineContext",
     "StepResult",
     "ExecutionResult",
