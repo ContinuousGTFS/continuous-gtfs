@@ -23,3 +23,7 @@ The same pipelines run unchanged on the [Continuous GTFS platform](https://conti
 ## Working on these docs
 
 The Reference section is generated from the package's docstrings and CLI parser on every build, so a wrong reference entry is fixed in the code. How to build and preview the site is in [CONTRIBUTING.md](https://github.com/ContinuousGTFS/continuous-gtfs/blob/develop/CONTRIBUTING.md#documentation).
+
+## Paths
+
+This site is served at docs.continuousgtfs.com. The guide and reference pages that site published before keep their paths here unchanged: every page under `/guide/` and `/reference/` is at the same URL, and the two older builtins paths (`/guide/builtins/schedule/` and `/guide/builtins/realtime/`) still redirect to the builtins catalogs.
