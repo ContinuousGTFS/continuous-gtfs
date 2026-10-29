@@ -1,0 +1,99 @@
+site_name: Continuous GTFS SDK
+site_description: Define, test, and run GTFS data pipelines as Python steps
+site_url: https://continuousgtfs.github.io/continuous-gtfs/
+repo_url: https://github.com/ContinuousGTFS/continuous-gtfs
+repo_name: ContinuousGTFS/continuous-gtfs
+edit_uri: edit/develop/docs/
+
+theme:
+  name: material
+  palette:
+    scheme: default
+    primary: blue grey
+  features:
+    - content.code.copy
+    - content.action.edit
+    - navigation.sections
+
+hooks:
+  - docs/_hooks/cli_reference.py
+  - docs/_hooks/builtins.py
+
+# Hooks are build code, not pages. _redirects.md is the cutover map for the
+# pages that moved here from the platform docs site; it is a repo document,
+# not a page.
+exclude_docs: |
+  _hooks/
+  _redirects.md
+
+plugins:
+  - search
+  # A published URL is a promise: a page that moves ships its redirect in
+  # the same change, mapped here.
+  - redirects:
+      redirect_maps: {}
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            # A builtin's apply() override shows the base method's docstring
+            # instead of an empty entry; a member with no docstring anywhere
+            # in its ancestry still renders empty, on purpose.
+            extensions: [griffe_inherited_docstrings]
+            # Hide private and dunder names.
+            filters: ["!^_"]
+            docstring_style: google
+            show_if_no_docstring: true
+            members_order: source
+            group_by_category: true
+            inherited_members: false
+            show_source: false
+            show_root_heading: false
+            show_root_toc_entry: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            separate_signature: true
+            show_signature_annotations: true
+            merge_init_into_class: true
+            docstring_section_style: table
+
+validation:
+  anchors: warn
+
+markdown_extensions:
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.betterem
+  - pymdownx.tilde
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - admonition
+  - pymdownx.details
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Making a change: jobs/make-a-change.md
+  - Guide:
+    - Getting Started: guide/index.md
+    - Concepts: guide/concepts.md
+    - Writing Transforms: guide/writing-transforms.md
+    - Builtins: guide/builtins.md
+    - Pipeline Structure: guide/pipeline-structure.md
+    - ID Mappings: guide/id-mappings.md
+    - Local Development: guide/local-development.md
+    - Testing Transforms: guide/testing-transforms.md
+    - CLI Guide: guide/cli.md
+  - Reference:
+    - The step model: reference/step.md
+    - Pipeline context: reference/context.md
+    - Results: reference/results.md
+    - Parsers: reference/parsers.md
+    - Scanning and running: reference/running.md
+    - Schedule builtins: reference/builtins-schedule.md
+    - Realtime builtins: reference/builtins-realtime.md
+    - Testing helpers: reference/testing.md
+    - CLI: reference/cli.md
