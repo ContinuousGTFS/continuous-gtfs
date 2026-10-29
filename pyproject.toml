@@ -38,6 +38,13 @@ dev = [
     "gtfs-digester>=0.4.0",
     "ruff>=0.15.20",
 ]
+docs = [
+    "griffe-inherited-docstrings>=1.1.4",
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.8.0",
+    "mkdocs-redirects>=1.2.3",
+    "mkdocstrings[python]>=1.0.8",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.15,<0.13.0"]
