@@ -9,12 +9,26 @@ A pipeline is a folder of `.py` files. No config file, no registry — the folde
 ```
 my-agency/
   __init__.py          # FEED_TYPE and the INPUTS manifest (required)
+  init.py              # seeds ctx.output from the schedule input
   calendar_cleanup.py
   route_metadata.py
   station_renames.py
 ```
 
 Files are scanned alphabetically. The framework discovers all Step instances defined at module level.
+
+## Seed the output
+
+`ctx.output` starts empty. The framework does not decide which input the pipeline edits; an init step does, and every other step works on what it put there. For a schedule pipeline it is one builtin:
+
+```python
+# init.py
+from continuous_gtfs.builtins.schedule import InitScheduleOutput
+
+init = InitScheduleOutput("schedule")   # the input name from INPUTS
+```
+
+`InitScheduleOutput` always runs before every other step. A realtime pipeline writes its own init step with `@step(before="*")`, choosing which inputs become outputs and under what names (see [Concepts: Realtime](concepts.md#realtime)). Without an init step the output stays empty and the run fails output validation. The [minimal example](https://github.com/ContinuousGTFS/continuous-gtfs/tree/develop/examples/minimal-schedule) has the complete shape.
 
 ## Declare the pipeline's inputs
 
@@ -94,7 +108,19 @@ remove_shuttle = RemoveRows(
 )
 ```
 
-The variable name (`remove_inactive`, `remove_shuttle`) becomes the step name in the DAG.
+```python
+# route_metadata.py
+from continuous_gtfs.builtins.schedule import MatchCondition, UpdateFields
+
+# Set the green line's color
+update_green_line = UpdateFields(
+    "routes.txt",
+    [MatchCondition("route_id", value="GREEN")],
+    {"route_color": "00A651"},
+)
+```
+
+The variable names (`remove_inactive`, `remove_shuttle`, `update_green_line`) become the step names in the DAG.
 
 ## Writing custom transforms
 
@@ -122,7 +148,7 @@ The `@step` decorator returns a Step instance (not a function). The framework tr
 Your function gets a `PipelineContext` with two separate data handles:
 
 - **`ctx.inputs`** — read-only, populated by the framework before the first step runs. Each entry is the already-parsed value for a named input declared in `INPUTS`. For a schedule pipeline whose `INPUTS["schedule"] = "gtfs_schedule_zip"`, `ctx.inputs["schedule"]` is a `dict[str, DataFrame]`. Required inputs are always present; an optional input that wasn't supplied has no entry, so check `name in ctx.inputs` (or use `ctx.inputs.get(name)`) before reading one.
-- **`ctx.output`** — the mutable working set transforms populate and mutate. The framework seeds it automatically (schedule: from the first `gtfs_schedule_zip` input; RT: mirrors each `FeedMessage` input by name), but pipelines that want custom seeding add an explicit init step that replaces `ctx.output` before the rest of the DAG runs.
+- **`ctx.output`** — the mutable working set transforms populate and mutate. It starts empty, and the pipeline's init step fills it before any other step runs (see [Seed the output](#seed-the-output)).
 
 Typical access patterns for a schedule transform:
 
@@ -157,7 +183,9 @@ def my_step(ctx):
 The `before` parameter works in the opposite direction — "run me before these steps":
 
 ```python
-setup = Step(before=[main_transform])  # setup runs before main_transform
+@step(files=["stops.txt"], before=[main_transform])
+def setup(ctx):   # runs before main_transform
+    ...
 ```
 
 !!! note
@@ -321,11 +349,14 @@ unzip -l output.zip
 For programmatic testing of a whole pipeline run:
 
 ```python
-from continuous_gtfs import scan_pipeline, resolve_dag
-from continuous_gtfs.pipelines.schedule import run_schedule_pipeline, extract_zip
+from pathlib import Path
 
+from continuous_gtfs import resolve_dag, scan_pipeline
+from continuous_gtfs.pipelines.schedule import extract_zip, run_schedule_pipeline
+
+# my-pipeline/ includes its init step, so the output is seeded
 steps = resolve_dag(scan_pipeline("my-pipeline/"))
-inputs = {"schedule": extract_zip(zip_bytes)}
+inputs = {"schedule": extract_zip(Path("data/schedule.zip").read_bytes())}
 result = run_schedule_pipeline(inputs, steps)
 assert result.execution_result.success
 ```

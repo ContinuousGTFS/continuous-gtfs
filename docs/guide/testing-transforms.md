@@ -53,7 +53,7 @@ Realtime steps read every GTFS-RT `FeedMessage` in `ctx.output` and mutate it in
 from continuous_gtfs.testing import realtime_context, trip_updates_feed
 
 def test_filter_drops_blocklisted_stops():
-    feed = trip_updates_feed(trip_id="t1", stop_ids=["S01-A", "GOOD", "S07-T2"])
+    feed = trip_updates_feed(trip_id="t1", stop_ids=["S01A", "GOOD", "S07B"])
     ctx = realtime_context(trip_updates=feed)
 
     filter_stops.apply(ctx)
@@ -93,7 +93,7 @@ It filters both frames to `~excluding`, sorts them (so row reordering within the
 
 ## Wiring it into your repo
 
-Point pytest at your pipeline folders so the transforms import under the same top-level names the scanner loads them under:
+Put the pipelines directory on pytest's path so a test can import a step from its module by folder and file name:
 
 ```toml
 # pyproject.toml
@@ -107,5 +107,7 @@ Then a test imports the step instance and applies it:
 ```python
 from schedule.cleanup import remove_inactive_calendars   # pipelines/schedule/cleanup.py
 ```
+
+The scanner loads the same files under a private package name of its own (`_pipeline_<folder>_<hash>`), not under these import paths, so a test that imports a step gets an equivalent object, not the one a pipeline run uses. That does not matter for a unit test, which applies the step to a context it built itself.
 
 Run with `uv run pytest`, and gate it in CI on every change to your pipeline code.

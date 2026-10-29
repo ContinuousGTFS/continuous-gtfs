@@ -63,7 +63,7 @@ uv run continuous-gtfs schedule pipelines/schedule/ \
   --diff-against data/published.zip --diff-detail
 ```
 
-The run prints one line per step with its row delta and status, then the diff. Exit code `1` means a step failed or the output differs from the baseline, which makes the same command usable as a CI guard.
+The run prints one line per step with its status and row delta, then the diff. Exit code `1` means a step failed or the output differs from the baseline. Output validation errors (the `Validate output` line) are printed but leave the exit code at `0`, so a CI guard built on this command also has to check them, for example in the `--json-events` file: `jq '.stages[] | select(.name == "validate_output") | .metadata.errors | length' run.json` must print `0`.
 
 While working on one step, run only that step and what it depends on:
 
@@ -94,7 +94,7 @@ A step or check that emits findings prints them after the step table, grouped by
 
 ## Lock it in with tests
 
-Every step worth writing is worth a unit test against a tiny fixture: fast, hermetic, and independent of whatever the sample data happens to contain. [Testing Transforms](testing-transforms.md) covers the pattern and the `continuous_gtfs.testing` helpers. Point pytest at the pipeline folders so tests import steps the way the scanner does:
+Every step worth writing is worth a unit test against a tiny fixture. Such a test is fast and hermetic, and it does not depend on whatever the sample data happens to contain. [Testing Transforms](testing-transforms.md) covers the pattern and the `continuous_gtfs.testing` helpers. Put the pipelines directory on pytest's path so tests can import steps by folder and file name:
 
 ```toml
 # pyproject.toml

@@ -11,7 +11,7 @@ To *remove* a route, trip, stop, or service with everything that belongs to it, 
 ```python
 @step(files=["stop_times.txt"], after=[remove_s15])
 def note_removed_stops(ctx):
-    gone = ctx.get_id_mappings("stops.txt", "stop_id")   # {"S15": None, "S15-T1": None, ...}
+    gone = ctx.get_id_mappings("stops.txt", "stop_id")   # {"S15": None, "S15A": None, ...}
 ```
 
 Write mappings yourself when your own `@step`:

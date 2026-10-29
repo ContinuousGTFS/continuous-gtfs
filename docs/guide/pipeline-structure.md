@@ -2,10 +2,12 @@
 
 ## The folder is the pipeline
 
-A pipeline is a directory of `.py` files. The framework scans the folder, imports each file, and discovers all module-level `Step` instances. No config file or registry needed.
+A pipeline is a directory of `.py` files. The framework scans the folder, imports each file, and discovers all module-level `Step` instances. The only required file is `__init__.py`, which declares the feed type and the inputs ([below](#__init__py)); there is no other config file or registry.
 
 ```
 my-agency/
+  __init__.py        # FEED_TYPE and INPUTS (required)
+  init.py            # seeds ctx.output from the schedule input
   calendar.py        # calendar cleanup rules
   routes.py          # route metadata updates
   stops.py           # station renames, stop removals
@@ -61,6 +63,8 @@ Prefix helper files with `_` to exclude them from scanning:
 
 ```
 my-agency/
+  __init__.py
+  init.py
   _constants.py      # shared constants, not scanned
   _utils.py           # helper functions, not scanned
   calendar.py         # scanned — defines steps
@@ -71,6 +75,8 @@ Or put helpers in a subdirectory — the scanner doesn't recurse:
 
 ```
 my-agency/
+  __init__.py
+  init.py
   helpers/
     constants.py      # not scanned (in subdirectory)
   calendar.py         # scanned
@@ -84,6 +90,8 @@ There's no prescribed structure. Some options:
 
 ```
 my-agency/
+  __init__.py
+  init.py
   calendar_cleanup.py
   route_metadata.py
   station_renames.py
@@ -94,6 +102,8 @@ my-agency/
 
 ```
 my-agency/
+  __init__.py
+  init.py
   data_quality.py      # validation-oriented transforms
   branding.py          # route names, colors, URLs
   expansion.py         # pre-opening station adjustments
@@ -103,6 +113,8 @@ my-agency/
 
 ```
 my-agency/
+  __init__.py
+  init.py
   rail_team.py
   bus_team.py
   operations.py

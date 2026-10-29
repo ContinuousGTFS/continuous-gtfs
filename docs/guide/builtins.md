@@ -37,8 +37,8 @@ Conditions combine as **groups**:
 # any-of: three stops in one step instead of three steps
 [
     [MatchCondition("stop_id", value="S13")],
-    [MatchCondition("stop_id", value="S13-T1")],
-    [MatchCondition("stop_id", value="S13-T2")],
+    [MatchCondition("stop_id", value="S13A")],
+    [MatchCondition("stop_id", value="S13B")],
 ]
 
 # (A and B) or C
