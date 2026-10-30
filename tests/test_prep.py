@@ -194,8 +194,8 @@ def test_prepare_exposes_input_specs_alongside_flat_manifest(tmp_path):
     prep = prepare_pipeline_run(pipeline_dir, inputs=[f"vp={vp}"])
     assert prep.manifest == {"vp": "gtfs_rt_protobuf", "overrides": "csv_table"}
     assert prep.input_specs == {
-        "vp": {"content_kind": "gtfs_rt_protobuf", "optional": False},
-        "overrides": {"content_kind": "csv_table", "optional": True},
+        "vp": {"content_kind": "gtfs_rt_protobuf", "optional": False, "role": None},
+        "overrides": {"content_kind": "csv_table", "optional": True, "role": None},
     }
 
 
@@ -274,3 +274,69 @@ def test_prepare_unknown_input_name_still_fails_even_when_optional_exists(tmp_pa
     vp = _rt_feed_file(tmp_path)
     with pytest.raises(ValueError, match="not declared in the pipeline's INPUTS"):
         prepare_pipeline_run(pipeline_dir, inputs=[f"vp={vp}", f"bogus={vp}"])
+
+
+# --- file_tree directory inputs (specs/transform-framework.md §Running
+# Pipelines Locally: a file_tree input accepts a directory, packed with the
+# canonical packer; a .zip path passes through as the archive itself) ---
+
+
+def test_prepare_file_tree_input_packs_a_directory(tmp_path):
+    from continuous_gtfs.canonical_zip import pack_entries
+    from continuous_gtfs.file_tree import FileTree
+
+    pipeline_dir = _make_pipeline_dir(
+        tmp_path,
+        inputs_manifest='INPUTS = {"supplemental": "file_tree"}\n',
+        transforms=_RT_PIPELINE,
+    )
+    supplemental = tmp_path / "supplemental"
+    (supplemental / "partials").mkdir(parents=True)
+    (supplemental / "overrides.txt").write_text("o")
+    (supplemental / "partials" / "october.txt").write_text("p")
+
+    prep = prepare_pipeline_run(pipeline_dir, inputs=[f"supplemental={supplemental}"])
+    tree = prep.inputs["supplemental"]
+    assert isinstance(tree, FileTree)
+    assert (tree / "partials" / "october.txt").read_text() == "p"
+    # The directory route IS the canonical packer — the parsed tree reads
+    # identically to one built from the canonical bytes for the same files
+    # (byte-identity itself is pinned in test_file_tree.py's
+    # pack_tree-vs-pack_entries golden assertion).
+    canonical = FileTree(
+        pack_entries([("overrides.txt", b"o"), ("partials/october.txt", b"p")])
+    )
+    assert [c.name for c in tree.iterdir()] == [c.name for c in canonical.iterdir()]
+    assert (tree / "overrides.txt").read_bytes() == b"o"
+
+
+def test_prepare_file_tree_input_accepts_a_zip_passthrough(tmp_path):
+    from continuous_gtfs.canonical_zip import pack_entries
+    from continuous_gtfs.file_tree import FileTree
+
+    pipeline_dir = _make_pipeline_dir(
+        tmp_path,
+        inputs_manifest='INPUTS = {"supplemental": "file_tree"}\n',
+        transforms=_RT_PIPELINE,
+    )
+    archive = tmp_path / "supplemental.zip"
+    archive.write_bytes(pack_entries([("a.txt", b"x")]))
+
+    prep = prepare_pipeline_run(pipeline_dir, inputs=[f"supplemental={archive}"])
+    tree = prep.inputs["supplemental"]
+    assert isinstance(tree, FileTree)
+    assert (tree / "a.txt").read_bytes() == b"x"
+
+
+def test_prepare_directory_for_a_non_file_tree_input_is_refused(tmp_path):
+    pipeline_dir = _make_pipeline_dir(
+        tmp_path,
+        inputs_manifest='INPUTS = {"overrides": "csv_table"}\n',
+        transforms=_RT_PIPELINE,
+    )
+    directory = tmp_path / "overrides"
+    directory.mkdir()
+    (directory / "a.csv").write_text("k,v\n1,a\n")
+
+    with pytest.raises(ValueError, match="only file_tree inputs"):
+        prepare_pipeline_run(pipeline_dir, inputs=[f"overrides={directory}"])

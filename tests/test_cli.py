@@ -332,10 +332,10 @@ def test_color_unknown_style_returns_plain():
 
 
 def test_format_row_puts_primary_key_first():
-    row = {"stop_name": "Main St", "stop_id": "S1", "stop_lat": "47.6"}
+    row = {"stop_name": "Main Street", "stop_id": "S1", "stop_lat": "47.6"}
     out = _format_row(row, primary_key=["stop_id"])
     assert out.startswith("stop_id=S1")
-    assert 'stop_name="Main St"' in out
+    assert 'stop_name="Main Street"' in out
     assert 'stop_lat="47.6"' in out
 
 

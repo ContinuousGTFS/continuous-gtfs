@@ -53,24 +53,24 @@ def _feed() -> dict[str, pl.DataFrame]:
             BLUE,{T3001},{SAT},E31:N23
             CR_S,{TS1500},{CRR_WK},CR_S_NBLW_shp
         """),
-        # T1001 is excerpted down to its N15 call only, so removing N15
+        # T1001 is excerpted down to its S300 call only, so removing S300
         # empties it; T1002 keeps its Fairview call. T3001's row uses
         # the real times at a Riverview platform.
         "stop_times.txt": gtfs_df(f"""
             trip_id,stop_id,arrival_time,departure_time,stop_sequence
-            {T1001},N15-T1,05:03:30,05:04:00,12
+            {T1001},S300-T1,05:03:30,05:04:00,12
             {T1002},S07-T2,04:34:30,04:35:00,1
-            {T1002},N15-T1,05:58:30,05:59:00,23
+            {T1002},S300-T1,05:58:30,05:59:00,23
             {T3001},E31-T1,04:09:30,04:10:00,1
             {TS1500},S_LW,04:35:30,04:36:00,1
         """),
         "stops.txt": gtfs_df("""
             stop_id,stop_name,location_type,parent_station
-            N15,Cedar Grove/148th,1,
-            N15-E-00001,Cedar Grove/148th Station Entrance A,2,N15
-            N15-E-00002,Cedar Grove/148th Station Entrance B,2,N15
-            N15-T1,Cedar Grove/148th,,N15
-            N15-T2,Cedar Grove/148th,,N15
+            S300,Cedar Grove,1,
+            S300-E-00001,Cedar Grove Station Entrance A,2,S300
+            S300-E-00002,Cedar Grove Station Entrance B,2,S300
+            S300-T1,Cedar Grove,,S300
+            S300-T2,Cedar Grove,,S300
             S07,Fairview Downtown,1,
             S07-T2,Fairview Downtown,,S07
             E31,Riverview,1,
@@ -256,12 +256,12 @@ def test_remove_trips_shape_warn_default_and_remove_override():
 
 
 def test_remove_stops_station_takes_platforms_entrances_stop_times_and_emptied_trip():
-    ctx = _apply(RemoveStops(ids=["N15"]), _ctx())
+    ctx = _apply(RemoveStops(ids=["S300"]), _ctx())
 
     stops = _col(ctx, "stops.txt", "stop_id")
-    assert not any(s.startswith("N15") for s in stops)
+    assert not any(s.startswith("S300") for s in stops)
     assert {"S07", "S07-T2", "E31", "E31-T1", "S_LW"} <= set(stops)
-    # T1001 called only at N15 → emptied → removed; T1002 keeps Fairview.
+    # T1001 called only at S300 → emptied → removed; T1002 keeps Fairview.
     assert _col(ctx, "trips.txt", "trip_id") == [T1002, T3001, TS1500]
     assert _col(ctx, "stop_times.txt", "stop_id") == ["S07-T2", "E31-T1", "S_LW"]
     took = _findings(ctx, "trips_removed_with_stops")
@@ -282,31 +282,31 @@ def test_remove_stops_station_takes_platforms_entrances_stop_times_and_emptied_t
 
 
 def test_remove_stops_detach_keeps_platforms_standalone_and_removes_entrances():
-    ctx = _apply(RemoveStops(ids=["N15"], children="detach"), _ctx())
+    ctx = _apply(RemoveStops(ids=["S300"], children="detach"), _ctx())
 
     stops = ctx.output["stops.txt"]
-    assert "N15" not in stops["stop_id"].to_list()
-    assert not any(s.startswith("N15-E") for s in stops["stop_id"].to_list())
-    platforms = stops.filter(pl.col("stop_id").is_in(["N15-T1", "N15-T2"]))
+    assert "S300" not in stops["stop_id"].to_list()
+    assert not any(s.startswith("S300-E") for s in stops["stop_id"].to_list())
+    platforms = stops.filter(pl.col("stop_id").is_in(["S300-T1", "S300-T2"]))
     assert platforms.height == 2
     assert platforms["parent_station"].to_list() == ["", ""]
     # Platforms stayed, so their stop_times and trips are untouched.
-    assert _col(ctx, "stop_times.txt", "stop_id").count("N15-T1") == 2
+    assert _col(ctx, "stop_times.txt", "stop_id").count("S300-T1") == 2
     assert _col(ctx, "trips.txt", "trip_id") == [T1001, T1002, T3001, TS1500]
     assert _findings(ctx, "trips_removed_with_stops") == []
     assert _rows_removed(ctx) == {"stops.txt": (3, "root")}
 
 
 def test_remove_stops_empty_trips_keep_leaves_the_stopless_trip():
-    ctx = _apply(RemoveStops(ids=["N15"], empty_trips="keep"), _ctx())
+    ctx = _apply(RemoveStops(ids=["S300"], empty_trips="keep"), _ctx())
     assert T1001 in _col(ctx, "trips.txt", "trip_id")
     assert _findings(ctx, "trips_removed_with_stops") == []
 
 
 def test_remove_stops_platform_alone_leaves_station_and_sibling():
-    ctx = _apply(RemoveStops(ids=["N15-T2"]), _ctx())
-    assert {"N15", "N15-T1", "N15-E-00001"} <= set(_col(ctx, "stops.txt", "stop_id"))
-    assert "N15-T2" not in _col(ctx, "stops.txt", "stop_id")
+    ctx = _apply(RemoveStops(ids=["S300-T2"]), _ctx())
+    assert {"S300", "S300-T1", "S300-E-00001"} <= set(_col(ctx, "stops.txt", "stop_id"))
+    assert "S300-T2" not in _col(ctx, "stops.txt", "stop_id")
     assert _col(ctx, "trips.txt", "trip_id") == [T1001, T1002, T3001, TS1500]
 
 
@@ -315,20 +315,20 @@ def test_remove_stops_follows_transfers_pathways_and_stop_areas():
     feed = _feed()
     feed["transfers.txt"] = gtfs_df("""
         from_stop_id,to_stop_id,transfer_type
-        N15-T1,N15-T2,0
+        S300-T1,S300-T2,0
         S07-T2,S_LW,0
     """)
     feed["pathways.txt"] = gtfs_df("""
         pathway_id,from_stop_id,to_stop_id,pathway_mode
-        p1,N15-E-00001,N15-T1,1
+        p1,S300-E-00001,S300-T1,1
         p2,E31,E31-T1,1
     """)
     feed["stop_areas.txt"] = gtfs_df("""
         area_id,stop_id
-        cedargrove,N15
+        cedargrove,S300
         fairview,S07
     """)
-    ctx = _apply(RemoveStops(ids=["N15"]), _ctx(feed))
+    ctx = _apply(RemoveStops(ids=["S300"]), _ctx(feed))
     assert _col(ctx, "transfers.txt", "from_stop_id") == ["S07-T2"]
     assert _col(ctx, "pathways.txt", "pathway_id") == ["p2"]
     assert _col(ctx, "stop_areas.txt", "area_id") == ["fairview"]
@@ -483,12 +483,12 @@ def test_never_active_exclude_protects_a_dead_service():
 
 
 def test_ids_shortcut_selects_exactly_the_any_of_groups():
-    by_ids = _apply(RemoveStops(ids=["N15-T1", "N15-T2"]), _ctx())
+    by_ids = _apply(RemoveStops(ids=["S300-T1", "S300-T2"]), _ctx())
     by_groups = _apply(
         RemoveStops(
             [
-                [MatchCondition("stop_id", value="N15-T1")],
-                [MatchCondition("stop_id", value="N15-T2")],
+                [MatchCondition("stop_id", value="S300-T1")],
+                [MatchCondition("stop_id", value="S300-T2")],
             ]
         ),
         _ctx(),
@@ -499,7 +499,7 @@ def test_ids_shortcut_selects_exactly_the_any_of_groups():
         f["code"] for f in by_groups.findings
     ]
     # And the selection actually did something.
-    assert "N15-T1" not in _col(by_ids, "stops.txt", "stop_id")
+    assert "S300-T1" not in _col(by_ids, "stops.txt", "stop_id")
 
 
 def test_condition_on_a_missing_column_warns_and_leaves_the_feed_untouched():
@@ -513,9 +513,9 @@ def test_condition_on_a_missing_column_warns_and_leaves_the_feed_untouched():
 
 
 def test_removed_records_are_recorded_into_id_mappings():
-    ctx = _apply(RemoveStops(ids=["N15"]), _ctx())
+    ctx = _apply(RemoveStops(ids=["S300"]), _ctx())
     stops = ctx.get_id_mappings("stops.txt", "stop_id")
-    assert set(stops) == {"N15", "N15-E-00001", "N15-E-00002", "N15-T1", "N15-T2"}
+    assert set(stops) == {"S300", "S300-E-00001", "S300-E-00002", "S300-T1", "S300-T2"}
     assert set(stops.values()) == {None}
     assert ctx.get_id_mappings("trips.txt", "trip_id") == {T1001: None}
 
@@ -604,8 +604,8 @@ def test_remove_records_only_counts_records_this_call_emptied():
 
 def test_remove_records_result_is_independent_of_id_order_and_repeats():
     a, b = _feed(), _feed()
-    remove_records(a, "stop", ["N15", "N15-T1"], policy={"trip": "remove"})
-    remove_records(b, "stop", ["N15-T1", "N15", "N15"], policy={"trip": "remove"})
+    remove_records(a, "stop", ["S300", "S300-T1"], policy={"trip": "remove"})
+    remove_records(b, "stop", ["S300-T1", "S300", "S300"], policy={"trip": "remove"})
     for name in a:
         assert a[name].equals(b[name]), name
 
@@ -638,14 +638,14 @@ def test_feed_start_date_reads_feed_info_or_returns_none():
 APR13 = "XLR_2026-04-13_Spring26_Weekday"  # weekdays to 20260501
 MAYFIELD = "XLR_2026-05-04_MayfieldNB_Weekday"  # to 20260515
 SHUTTLE = "Shuttle_May_26-28"  # weekdays 20260526..20260528
-YLINE = "YLINE_2026-01-26_YLink_Weekday_12mins"  # to 20260828
+YLINE = "YLINE_2026-01-26_YRail_Weekday_12mins"  # to 20260828
 NEVER = "XLR_composed_never_active"
 CUTOFF = "20260601"
 
 T_APR13 = f"{APR13}_RED_1001"
 T_MAYFIELD = f"{MAYFIELD}_RED_1001"
 T_EMW = f"{EMW}_RED_1001"
-T_SHUTTLE = "Shuttle_May_26-28-Weekday-RED-SHUTTLE-ALS-FWD-NB-2240-a8f23e3"
+T_SHUTTLE = "Shuttle_May_26-28-Weekday-RED-SHUTTLE-SHX-AB-NB-2240-a8f23e3"
 T_YLINE = f"{YLINE}_YLINE_10"
 
 
@@ -663,7 +663,7 @@ def _expiry_feed() -> dict[str, pl.DataFrame]:
             RED,{T_APR13},{APR13},C15:N23
             RED,{T_MAYFIELD},{MAYFIELD},C15:N23
             RED,{T_EMW},{EMW},C15:N23
-            RED-SHUTTLE,{T_SHUTTLE},{SHUTTLE},RED-SHUTTLE-ALS-FWD-NB
+            RED-SHUTTLE,{T_SHUTTLE},{SHUTTLE},RED-SHUTTLE-SHX-AB-NB
             YLINE,{T_YLINE},{YLINE},T01:T25
             CR_S,{TS1500},{CRR_WK},CR_S_NBLW_shp
         """),
@@ -759,9 +759,9 @@ def test_expired_before_keeps_a_service_an_added_exception_keeps_alive():
 
 def test_expired_before_drops_past_exception_rows_on_a_surviving_service():
     ctx = _apply(RemoveServices(expired_before=CUTOFF), _ctx(_expiry_feed()))
-    tline = ctx.output["calendar_dates.txt"].filter(pl.col("service_id") == YLINE)
+    yline_dates = ctx.output["calendar_dates.txt"].filter(pl.col("service_id") == YLINE)
     # 20260216 and 20260406 are before the cutoff; 20260525 is too. 20260703 stays.
-    assert tline["date"].to_list() == ["20260703"]
+    assert yline_dates["date"].to_list() == ["20260703"]
     assert YLINE in _col(ctx, "calendar.txt", "service_id")
     assert T_YLINE in _col(ctx, "trips.txt", "trip_id")
     # Counted in calendar_dates.txt: EMW's one row + YLINE's three stale rows.

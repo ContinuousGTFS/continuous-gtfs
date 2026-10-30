@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from google.protobuf.json_format import MessageToJson
 from google.transit import gtfs_realtime_pb2 as gtfs_rt
 
+from ..clock import system_now
 from ..context import PipelineContext
 from ..executor import PipelineExecutor
 from ..results import ExecutionResult
@@ -43,6 +45,7 @@ def run_realtime_pipeline(
     environment: str = "production",
     executor: PipelineExecutor | None = None,
     disabled_steps: list[str] | None = None,
+    now: datetime | None = None,
 ) -> RealtimePipelineResult:
     """Run the RT pipeline against already-parsed inputs.
 
@@ -78,6 +81,7 @@ def run_realtime_pipeline(
         inputs=dict(inputs),
         output={},
         environment=environment,
+        now=now or system_now(),
     )
     exec_result = executor.execute(steps, ctx, disabled_steps=disabled_steps)
     result.execution_result = exec_result

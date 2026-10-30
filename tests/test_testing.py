@@ -52,12 +52,12 @@ def test_gtfs_df_strips_leading_indentation():
     df = gtfs_df(
         """
         stop_id,stop_name
-        S1,Main St
+        S1,Main Street
         S2,Oak Ave
         """
     )
     assert df["stop_id"].to_list() == ["S1", "S2"]
-    assert df["stop_name"].to_list() == ["Main St", "Oak Ave"]
+    assert df["stop_name"].to_list() == ["Main Street", "Oak Ave"]
 
 
 def test_gtfs_df_all_text_prevents_silent_match_failure():
@@ -256,7 +256,7 @@ def test_assert_unchanged_passes_when_only_excluded_row_changes():
     before = gtfs_df(
         """
         stop_id,stop_name
-        S1,Main St
+        S1,Main Street
         S2,Oak Ave
         S3,Park Blvd
         """
@@ -276,7 +276,7 @@ def test_assert_unchanged_fails_when_non_excluded_row_changes():
     before = gtfs_df(
         """
         stop_id,stop_name
-        S1,Main St
+        S1,Main Street
         S2,Oak Ave
         """
     )
@@ -295,7 +295,7 @@ def test_assert_unchanged_fails_on_unexpected_row_removal():
     before = gtfs_df(
         """
         stop_id,stop_name
-        S1,Main St
+        S1,Main Street
         S2,Oak Ave
         S3,Park Blvd
         """
@@ -323,7 +323,7 @@ def test_assert_unchanged_tolerates_row_reordering_in_unchanged_set():
     before = gtfs_df(
         """
         stop_id,stop_name
-        S1,Main St
+        S1,Main Street
         S2,Oak Ave
         S3,Park Blvd
         """
@@ -349,25 +349,25 @@ def test_end_to_end_schedule_step_with_helpers():
     stops = gtfs_df(
         """
         stop_id,stop_name,stop_lat,stop_lon
-        E01,Expansion Stop 1,47.6,122.3
-        E07,Expansion Stop 7,47.7,122.4
+        S100,Expansion Stop 1,47.6,122.3
+        S107,Expansion Stop 7,47.7,122.4
         455,Old Town,47.608,122.337
         """
     )
     ctx = schedule_context(**{"stops.txt": stops})
 
-    # Regex matches E01 and E07; 455 is unaffected.
+    # Regex matches S100 and S107; 455 is unaffected.
     step_inst = RemoveRows(
         "stops.txt",
-        [MatchCondition("stop_id", regex=r"^E\d+$")],
+        [MatchCondition("stop_id", regex=r"^S\d+$")],
     )
     step_inst.name = "remove_expansion_stops"
     step_inst.apply(ctx)
 
     result = ctx.output["stops.txt"]
     remaining_ids = result["stop_id"].to_list()
-    assert "E01" not in remaining_ids
-    assert "E07" not in remaining_ids
+    assert "S100" not in remaining_ids
+    assert "S107" not in remaining_ids
     assert "455" in remaining_ids
     assert len(result) == 1
 
@@ -376,10 +376,10 @@ def test_end_to_end_realtime_step_with_helpers():
     """Demonstrate the full RT pattern: feed builders → realtime_context → step."""
     from continuous_gtfs.builtins.realtime import FilterStopsByID
 
-    feed = trip_updates_feed(trip_id="T1", stop_ids=["E01", "S2", "E07"])
+    feed = trip_updates_feed(trip_id="T1", stop_ids=["S100", "S2", "S107"])
     ctx = realtime_context(trip_updates=feed)
 
-    step_inst = FilterStopsByID(blocked_stop_ids={"E01", "E07"})
+    step_inst = FilterStopsByID(blocked_stop_ids={"S100", "S107"})
     step_inst.name = "filter_expansion_stops"
     step_inst.apply(ctx)
 
@@ -387,8 +387,8 @@ def test_end_to_end_realtime_step_with_helpers():
     assert len(output_feed.entity) == 1
     stus = output_feed.entity[0].trip_update.stop_time_update
     remaining_stop_ids = [stu.stop_id for stu in stus]
-    assert "E01" not in remaining_stop_ids
-    assert "E07" not in remaining_stop_ids
+    assert "S100" not in remaining_stop_ids
+    assert "S107" not in remaining_stop_ids
     assert "S2" in remaining_stop_ids
 
 
@@ -397,8 +397,8 @@ def test_end_to_end_with_assert_unchanged():
     stops = gtfs_df(
         """
         stop_id,stop_name
-        E01,Expansion 1
-        S1,Main St
+        S100,Expansion 1
+        S1,Main Street
         S2,Oak Ave
         """
     )
@@ -407,16 +407,16 @@ def test_end_to_end_with_assert_unchanged():
 
     step_inst = RemoveRows(
         "stops.txt",
-        [MatchCondition("stop_id", value="E01")],
+        [MatchCondition("stop_id", value="S100")],
     )
     step_inst.name = "remove_e01"
     step_inst.apply(ctx)
 
-    # Verify the step only touched E01.
+    # Verify the step only touched S100.
     assert_unchanged(
         before_snapshot,
         ctx.output["stops.txt"],
-        excluding=pl.col("stop_id") == "E01",
+        excluding=pl.col("stop_id") == "S100",
     )
-    # Also confirm E01 is gone.
-    assert "E01" not in ctx.output["stops.txt"]["stop_id"].to_list()
+    # Also confirm S100 is gone.
+    assert "S100" not in ctx.output["stops.txt"]["stop_id"].to_list()

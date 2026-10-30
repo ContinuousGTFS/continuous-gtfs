@@ -94,3 +94,17 @@ def _parse_rt_protobuf(raw: bytes) -> Any:
     feed = gtfs_rt.FeedMessage()
     feed.ParseFromString(raw)
     return feed
+
+
+@register_parser("file_tree")
+def _parse_file_tree(raw: bytes) -> Any:
+    """Zip archive bytes → FileTree, a read-only Traversable root.
+
+    The natural producer is a git source with a tree path (the canonical
+    archive), but any pushed or fetched zip parses the same way —
+    transport and parsing stay decoupled (specs/asset-registry.md
+    §Content Kinds, §Tree paths).
+    """
+    from .file_tree import FileTree
+
+    return FileTree(raw)

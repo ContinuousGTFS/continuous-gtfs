@@ -8,7 +8,7 @@ from continuous_gtfs.builtins.realtime import (
 
 # Filter non-revenue expansion stations
 filter_stops = FilterStopsByID(
-    blocked_stop_ids={"E01", "E07"},
+    blocked_stop_ids={"S100", "S107"},
     description="Filter non-revenue expansion stations",
 )
 

@@ -48,9 +48,47 @@ ROUTE_WITHOUT_TRIPS = "route_without_trips"
 SHAPE_WITHOUT_TRIPS = "shape_without_trips"
 TRIPS_REMOVED_WITH_STOPS = "trips_removed_with_stops"
 
-_ROWS_REMOVED_DECL = (ROWS_REMOVED, {"subject": ["file"]})
-_ROUTE_WITHOUT_TRIPS_DECL = (ROUTE_WITHOUT_TRIPS, {"subject": ["route_id"]})
-_SHAPE_WITHOUT_TRIPS_DECL = (SHAPE_WITHOUT_TRIPS, {"subject": ["shape_id"]})
+_ROWS_REMOVED_DECL = (
+    ROWS_REMOVED,
+    {
+        "subject": ["file"],
+        "description": (
+            "Rows removed from a file: the root records (`role=root`), a "
+            "cascade of what referenced them (`cascade`), or a prune of what "
+            "they left empty (`prune`). The count is the rows removed."
+        ),
+    },
+)
+_ROUTE_WITHOUT_TRIPS_DECL = (
+    ROUTE_WITHOUT_TRIPS,
+    {
+        "subject": ["route_id"],
+        "description": (
+            "This step left the route with no trips and kept it "
+            "(`empty_routes='warn'`)."
+        ),
+    },
+)
+_SHAPE_WITHOUT_TRIPS_DECL = (
+    SHAPE_WITHOUT_TRIPS,
+    {
+        "subject": ["shape_id"],
+        "description": (
+            "This step left the shape with no trips and kept it "
+            "(`empty_shapes='warn'`)."
+        ),
+    },
+)
+_TRIPS_REMOVED_WITH_STOPS_DECL = (
+    TRIPS_REMOVED_WITH_STOPS,
+    {
+        "description": (
+            "Removing stops left trips with no stop_times, and those trips "
+            "were removed too (`empty_trips='remove'`). The count is the "
+            "trips."
+        ),
+    },
+)
 
 #: Which warning names an emptied-but-kept record of each type.
 _EMPTIED_WARNINGS = {
@@ -191,18 +229,52 @@ class _SemanticRemoval(Step):
 
 
 class RemoveRoutes(_SemanticRemoval):
-    """Remove routes with their trips, stop_times, fare rules, network rows,
-    attributions and transfers.
+    """Remove routes with their trips and everything a trip takes.
 
-    Select routes with `conditions` (the `RemoveRows` group shape, evaluated
-    on `routes.txt`), `ids=[...]`, or both; `exclude` protects rows. A
-    service left with no trips is removed (`empty_services`); a shape left
-    with no trips is kept and warned about (`empty_shapes`).
+    Removing a route removes its `trips.txt` rows (and their
+    `stop_times.txt`, `frequencies.txt`, `attributions.txt` and
+    `transfers.txt` rows), plus its `fare_rules.txt`, `route_networks.txt`,
+    `attributions.txt` and `transfers.txt` rows, transitively to a
+    fixpoint. Every removed id is written to `ctx.id_mappings` with a
+    `None` value so a custom step downstream can read what went away.
 
-    Usage:
+    Args:
+        conditions: Which records to remove, in the
+            [`RemoveRows`][continuous_gtfs.builtins.schedule.RemoveRows]
+            group shape, evaluated on the record's home file.
+        ids: Key values to remove; the same as one any-of group per id.
+            Unions with `conditions`. One of the two is required.
+        exclude: Groups in the same shape; a matching record is protected.
+        empty_services: What to do with a service this step leaves with no
+            trips: `"remove"`, `"warn"` (keep it and emit a warning naming
+            it), or `"keep"`.
+        empty_shapes: The same for a shape left with no trips. Shapes are
+            display geometry other trips may be re-pointed at, so the
+            default keeps them.
+        description: Label shown in the Console. Defaults to
+            `Remove routes`.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
 
-        remove_link = RemoveRoutes(ids=["100479", "2LINE"])
+    Note:
+        A missing `routes.txt`, or a selection that matches nothing, is a
+        silent no-op. A condition naming a column `routes.txt` lacks emits
+        `column_missing` and the step does nothing. A referencing file that
+        is absent, or lacks the referencing column, is skipped.
+
+    Examples:
+        ```python
+        remove_commuter = RemoveRoutes(ids=["COMMUTER_1", "COMMUTER_2"])
+
+        remove_shuttles = RemoveRoutes(
+            [MatchCondition("route_short_name", regex=r"Shuttle$")],
+            exclude=[[MatchCondition("route_id", value="SHUTTLE_KEEP")]],
+        )
+        ```
     """
+
+    category = "Semantic removals"
 
     record_type = "route"
     findings = [_ROWS_REMOVED_DECL, _COLUMN_MISSING_DECL, _SHAPE_WITHOUT_TRIPS_DECL]
@@ -234,13 +306,45 @@ class RemoveRoutes(_SemanticRemoval):
 
 
 class RemoveTrips(_SemanticRemoval):
-    """Remove trips with their stop_times, frequencies, attributions and
-    transfers.
+    """Remove trips with their stop_times, frequencies, attributions and transfers.
 
-    A service left with no trips is removed (`empty_services`); a route or
-    shape left with no trips is kept and warned about (`empty_routes`,
-    `empty_shapes`) — agencies keep dormant routes on purpose.
+    Every removed id is written to `ctx.id_mappings` with a `None` value.
+
+    Args:
+        conditions: Which records to remove, in the
+            [`RemoveRows`][continuous_gtfs.builtins.schedule.RemoveRows]
+            group shape, evaluated on the record's home file.
+        ids: Key values to remove; the same as one any-of group per id.
+            Unions with `conditions`. One of the two is required.
+        exclude: Groups in the same shape; a matching record is protected.
+        empty_services: What to do with a service this step leaves with no
+            trips: `"remove"`, `"warn"` (keep it and emit a warning naming
+            it), or `"keep"`. A service with no trips is dead data, so the
+            default removes it.
+        empty_routes: The same for a route left with no trips. Agencies
+            keep dormant routes on purpose (a bus bridge), so the default
+            keeps it and warns.
+        empty_shapes: The same for a shape left with no trips.
+        description: Label shown in the Console. Defaults to
+            `Remove trips`.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
+
+    Note:
+        A missing `trips.txt`, or a selection that matches nothing, is a
+        silent no-op. A condition naming a column `trips.txt` lacks emits
+        `column_missing` and the step does nothing.
+
+    Examples:
+        ```python
+        remove_test_trips = RemoveTrips(
+            [MatchCondition("trip_id", regex=r"^TEST_")],
+        )
+        ```
     """
+
+    category = "Semantic removals"
 
     record_type = "trip"
     findings = [
@@ -279,29 +383,66 @@ class RemoveTrips(_SemanticRemoval):
 
 
 class RemoveStops(_SemanticRemoval):
-    """Remove stops — stations, platforms, entrances — with their stop_times,
-    transfers, pathways and stop_areas rows.
+    """Remove stops with their children and every row that references them.
 
-    `children` decides what happens to rows whose `parent_station` names a
-    removed stop: `"remove"` (default) takes them too, recursively — a
-    station means the station; `"detach"` clears `parent_station` on
-    platforms and still removes entrances, generic nodes and boarding areas,
-    which cannot exist without a parent.
+    A removed stop takes its `stop_times.txt` rows, its `transfers.txt` and
+    `pathways.txt` rows (either stop column), its `stop_areas.txt` rows,
+    and, by default, every row whose `parent_station` names it. Removing a
+    station therefore means the station: its platforms, entrances, nodes
+    and boarding areas go too, recursively. Every removed id is written to
+    `ctx.id_mappings` with a `None` value.
 
-    A trip left with no stop_times is removed (`empty_trips`) and a warning
-    says so; whatever those trips emptied then follows the `RemoveTrips`
-    defaults.
+    Args:
+        conditions: Which records to remove, in the
+            [`RemoveRows`][continuous_gtfs.builtins.schedule.RemoveRows]
+            group shape, evaluated on the record's home file.
+        ids: Key values to remove; the same as one any-of group per id.
+            Unions with `conditions`. One of the two is required.
+        exclude: Groups in the same shape; a matching record is protected.
+        children: What to do with rows whose `parent_station` names a
+            removed stop. `"remove"` takes them too, recursively.
+            `"detach"` clears `parent_station` on platforms (location type
+            blank or `0`) so they stand alone, and still removes entrances,
+            generic nodes and boarding areas, which cannot exist without a
+            parent.
+        empty_trips: What to do with a trip this step leaves with no
+            stop_times: `"remove"`, `"warn"` (keep it and emit a warning
+            naming it), or `"keep"`. Under the default the trips are removed
+            and a `trips_removed_with_stops` warning says how many; what
+            those trips emptied then follows the
+            [`RemoveTrips`][continuous_gtfs.builtins.schedule.RemoveTrips]
+            defaults.
+        empty_services: The same for a service left with no trips.
+        empty_routes: The same for a route left with no trips.
+        empty_shapes: The same for a shape left with no trips.
+        description: Label shown in the Console. Defaults to
+            `Remove stops`.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
 
-    Usage:
+    Note:
+        A missing `stops.txt`, or a selection that matches nothing, is a
+        silent no-op. A condition naming a column `stops.txt` lacks emits
+        `column_missing` and the step does nothing.
 
-        remove_n15 = RemoveStops(ids=["N15"])   # the station and everything in it
+    Examples:
+        ```python
+        # The whole station: platforms, entrances, and everything under it
+        remove_station = RemoveStops(ids=["S100"])
+
+        # Demote the station instead: platforms stay, entrances go
+        detach_station = RemoveStops(ids=["S100"], children="detach")
+        ```
     """
+
+    category = "Semantic removals"
 
     record_type = "stop"
     findings = [
         _ROWS_REMOVED_DECL,
         _COLUMN_MISSING_DECL,
-        TRIPS_REMOVED_WITH_STOPS,
+        _TRIPS_REMOVED_WITH_STOPS_DECL,
         _ROUTE_WITHOUT_TRIPS_DECL,
         _SHAPE_WITHOUT_TRIPS_DECL,
     ]
@@ -343,40 +484,79 @@ class RemoveStops(_SemanticRemoval):
 
 
 class RemoveServices(_SemanticRemoval):
-    """Remove services from both calendar files with their trips.
+    """Remove services from both calendar files, with their trips.
 
-    Selection is by id only: `ids=[...]`, and/or condition groups whose
-    every condition is on `service_id` (value or regex), evaluated over the
-    union of service ids in `calendar.txt` and `calendar_dates.txt`, so a
-    regex reaches a service defined only by exceptions. A condition on any
-    other column raises at construction.
+    A service's rows in `calendar.txt` and `calendar_dates.txt` go
+    together, then its `trips.txt` rows and everything a trip takes.
+    Every removed id is written to `ctx.id_mappings` (services under
+    `calendar.txt`) with a `None` value.
 
-    Selectors:
+    Selection is by `service_id` only, evaluated over the union of service
+    ids in both calendar files so a regex reaches a service defined only
+    by exceptions. The selectors union; `exclude` protects a service from
+    every one of them.
 
-    - `never_active=True` selects every service with no active date at
-      all once its calendar row and its exceptions are resolved together.
-      With `simplify_calendar=True` (default), a service kept alive only by
-      `calendar_dates.txt` adds loses its all-zero `calendar.txt` row.
-    - `expired_before` selects every service whose last active date is
-      strictly before a cutoff: an explicit `YYYYMMDD` string or `date`, or
-      `True` for the feed's own `feed_info.txt` `feed_start_date`. With no
-      explicit date and no `feed_start_date` the step fails — never a
-      silent no-op, and never the wall clock, so output stays a function
-      of the run's inputs and configuration. Exception rows dated before
-      the cutoff on services that survive are removed as well, counted in
-      `calendar_dates.txt`'s `rows_removed`. A service with no active date
-      belongs to `never_active`; combine the two in one step.
+    Args:
+        conditions: Condition groups whose every condition is on
+            `service_id` (value or regex). A condition on any other column
+            raises at construction.
+        ids: Service ids to remove. Unions with `conditions` and the
+            selectors below.
+        exclude: Groups in the same shape; a matching service is protected
+            from every selector.
+        never_active: Also remove every service with no active date at
+            all, once its `calendar.txt` weekday flags over its date range
+            and its `calendar_dates.txt` adds and removals are resolved
+            together: an all-zero calendar row with no added dates, or a
+            row whose every in-range service day is cancelled.
+        simplify_calendar: With `never_active`, a service kept alive only
+            by `calendar_dates.txt` adds is not removed; its dead all-zero
+            `calendar.txt` row is dropped and its exception rows kept.
+            `False` leaves that row alone.
+        expired_before: Also remove every service whose last active date
+            is strictly before a cutoff: `True` for the feed's own
+            `feed_info.txt` `feed_start_date`, or an explicit `"YYYYMMDD"`
+            string or `date`. Exception rows dated before the cutoff on
+            services that survive are removed as well, counted in
+            `calendar_dates.txt`'s `rows_removed`. A service with no active
+            date at all is `never_active`'s, not this selector's; combine
+            the two in one step for both.
+        empty_routes: What to do with a route this step leaves with no
+            trips: `"remove"`, `"warn"` (keep it and emit a warning naming
+            it), or `"keep"`.
+        empty_shapes: The same for a shape left with no trips.
+        description: Label shown in the Console. Defaults to a summary of
+            the selectors.
+        **kwargs: Shared step parameters (`after`, `before`, `priority`,
+            `enabled`, `tags`, `data_owner`); see
+            [`Step`][continuous_gtfs.step.Step].
 
-    Selected sets union; `exclude` protects a service from every selector.
-    A route or shape left with no trips is kept and warned about.
+    Note:
+        `expired_before=True` fails the step when the feed has no
+        `feed_info.txt` or no `feed_start_date`: a feed without one and no
+        configured cutoff is a data or configuration error, and the step
+        will not guess. No run date is ever consulted, so the same feed and
+        configuration produce the same output whenever the pipeline runs.
+        A selection that matches nothing is a silent no-op.
 
-    Usage:
-
+    Examples:
+        ```python
         drop_dead_services = RemoveServices(never_active=True)
-        drop_llr = RemoveServices([MatchCondition("service_id", regex=r"^LLR")])
-        drop_expired = RemoveServices(expired_before=True)      # feed_start_date
-        drop_spring = RemoveServices(expired_before="20260601")  # explicit
+
+        drop_rail = RemoveServices(
+            [MatchCondition("service_id", regex=r"^RAIL")],
+            exclude=[[MatchCondition("service_id", value="RAIL_SP26")]],
+        )
+
+        # Everything that stopped running before this feed's feed_start_date
+        drop_expired = RemoveServices(expired_before=True)
+
+        # Pin the cutoff, and take the never-active calendars in the same step
+        drop_pre_fall = RemoveServices(expired_before="20260901", never_active=True)
+        ```
     """
+
+    category = "Semantic removals"
 
     record_type = "service"
     findings = [

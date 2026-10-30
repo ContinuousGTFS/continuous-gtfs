@@ -4,27 +4,37 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import io
 import sys
+import tokenize
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from .parsers import known_kinds
-from .step import Step, definition_hash
+from .step import Step, definition_hash, definition_text
+
+InputRole = Literal["primary", "supplemental"]
+
+# The `role` vocabulary an INPUTS mapping entry may declare. Absent means a
+# reference input; there is deliberately no word for it.
+INPUT_ROLES: tuple[InputRole, ...] = ("primary", "supplemental")
 
 
 class InputSpec(TypedDict):
     """One normalized `INPUTS` manifest entry.
 
     `load_inputs_manifest` reduces both manifest forms — a bare
-    content_kind string (required) and a `{"content_kind": ..., "optional":
-    True}` mapping — to this shape so every consumer (worker dispatch
-    validation, registration, the local CLI) reads one structure. See
-    specs/transform-framework.md §INPUTS manifest.
+    content_kind string (required) and a `{"content_kind": ...,
+    "optional": ..., "role": ...}` mapping — to this shape so every
+    consumer (worker dispatch validation, registration, the local CLI)
+    reads one structure. `role` is None when the entry declares none
+    (a reference input). See specs/transform-framework.md §INPUTS manifest.
     """
 
     content_kind: str
     optional: bool
+    role: InputRole | None
 
 
 def scan_pipeline(folder: str | Path, root: str | Path | None = None) -> list[Step]:
@@ -43,7 +53,9 @@ def scan_pipeline(folder: str | Path, root: str | Path | None = None) -> list[St
     defaults to the parent of a `pipelines/` folder or else the folder's
     parent — `source_hash` (set here from `definition_params()` for a
     builtin instance; already set by @step for a function) and
-    `module_hash` over the defining module's bytes.
+    `module_hash` over the defining module's bytes — each with the text it
+    hashes beside it (`source`, `module_source`), set exactly when the hash
+    is.
     """
     folder = Path(folder).resolve()
     root = _codebase_root(folder, root)
@@ -53,7 +65,7 @@ def scan_pipeline(folder: str | Path, root: str | Path | None = None) -> list[St
     steps: list[Step] = []
     seen_names: set[str] = set()
     seen_ids: set[int] = set()
-    module_hashes: dict[str, str] = {}
+    module_hashes: dict[str, tuple[str, str] | None] = {}
 
     _register_package(folder, pkg_name)
 
@@ -84,7 +96,47 @@ def scan_pipeline(folder: str | Path, root: str | Path | None = None) -> list[St
                 seen_ids.add(id(obj))
                 steps.append(obj)
 
+    validate_roles(steps)
     return steps
+
+
+def likely_checks(steps: list[Step]) -> list[str]:
+    """Names of `@step` functions that declare findings and operate on no
+    files — usually checks declared as transforms. The local CLI warns about
+    them (specs/transform-framework.md §Checks); worker startup and
+    registration stay quiet."""
+    return [
+        s.name
+        for s in steps
+        if not s.is_check and not s.is_builtin and s.declared_findings and not s.files
+    ]
+
+
+def _step_label(s: Step) -> str:
+    return s.name or getattr(s, "_source_func", type(s)).__name__
+
+
+def validate_roles(steps: list[Step]) -> None:
+    """Reject DAG edges that involve a check (specs/transform-framework.md
+    §Checks): a check runs after every transform and no step orders against
+    it. A check's own before/after is already rejected where it is declared
+    (the @check decorator / Check constructor); this catches a transform
+    that names a check in its before/after."""
+    for s in steps:
+        if s.is_check:
+            continue
+        for attr in ("after", "before"):
+            refs = getattr(s, attr)
+            if refs == "*":
+                continue
+            for ref in refs:
+                if isinstance(ref, Step) and ref.is_check:
+                    raise ValueError(
+                        f"Step {_step_label(s)} names check {_step_label(ref)} "
+                        f"in its {attr}=[...]; a check runs after every "
+                        "transform and no step may order against it. Drop the "
+                        "reference. See specs/transform-framework.md §Checks."
+                    )
 
 
 def _codebase_root(folder: Path, root: str | Path | None) -> Path:
@@ -96,37 +148,56 @@ def _codebase_root(folder: Path, root: str | Path | None) -> Path:
 
 
 def _stamp_provenance(
-    step_obj: Step, root: Path, module_hashes: dict[str, str]
+    step_obj: Step, root: Path, module_hashes: dict[str, tuple[str, str] | None]
 ) -> None:
-    """Fill source_file (root-relative), source_hash, module_hash from the
-    step's absolute `source_path`. Idempotent — a re-scan of cached modules
-    reads the same absolute path again, never the relative form a prior
-    scan emitted. Never raises: a step whose source cannot be read registers
-    with the hashes empty rather than failing the scan."""
+    """Fill source_file (root-relative), source_hash + source, module_hash +
+    module_source from the step's absolute `source_path`. Idempotent — a
+    re-scan of cached modules reads the same absolute path again, never the
+    relative form a prior scan emitted. Never raises: a step whose source
+    cannot be read registers with the hashes and texts empty rather than
+    failing the scan. Each text is set exactly when its hash is."""
     if step_obj.source_hash is None and step_obj.is_builtin:
         # A builtin instance IS its parameters. A custom function whose
         # source was unavailable stays unknown — hashing its attributes would
         # make two different bodies read as one definition.
         try:
             step_obj.source_hash = definition_hash(step_obj)
+            step_obj.source = definition_text(step_obj)
         except Exception:  # noqa: BLE001 — provenance is best-effort
             step_obj.source_hash = None
+            step_obj.source = None
     if step_obj.source_path is None:
         return
     src = Path(step_obj.source_path)
     key = str(src)
     if key not in module_hashes:
         try:
-            module_hashes[key] = hashlib.sha256(src.read_bytes()).hexdigest()
-        except OSError:
-            module_hashes[key] = ""
-    step_obj.module_hash = module_hashes[key] or None
+            raw = src.read_bytes()
+            module_hashes[key] = (hashlib.sha256(raw).hexdigest(), _decode_module(raw))
+        except (OSError, SyntaxError, LookupError, UnicodeDecodeError):
+            # Unreadable, or not text in its own declared encoding: neither
+            # text nor hash — a hash with no faithful text to show for it is
+            # never reported (specs/transform-framework.md §Step Snapshot at
+            # Registration, `module_hash`).
+            module_hashes[key] = None
+    entry = module_hashes[key]
+    step_obj.module_hash = entry[0] if entry else None
+    step_obj.module_source = entry[1] if entry else None
     try:
         step_obj.source_file = src.resolve().relative_to(root).as_posix()
     except ValueError:
         # Defined outside the codebase root (an installed package's step):
         # keep the path as found rather than invent a relative one.
         step_obj.source_file = str(src)
+
+
+def _decode_module(raw: bytes) -> str:
+    """A module's bytes as Python itself reads them: in the encoding its
+    PEP 263 coding declaration or UTF-8 BOM names, else UTF-8 — strictly,
+    so the text never silently differs from the bytes `module_hash`
+    covers. Raises on an unknown or undecodable encoding."""
+    encoding, _ = tokenize.detect_encoding(io.BytesIO(raw).readline)
+    return raw.decode(encoding)
 
 
 VALID_FEED_TYPES = ("schedule", "realtime")
@@ -213,10 +284,12 @@ def load_inputs_manifest(folder: str | Path) -> dict[str, InputSpec]:
     `INPUTS` dict in the folder's `__init__.py` (see
     specs/transform-framework.md §INPUTS manifest). Each value is either
     a bare `content_kind` string — a **required** input — or a mapping
-    `{"content_kind": <kind>, "optional": True}` — an **optional** input.
-    Both forms are normalized to `InputSpec` here so callers never see
-    the raw shape; `manifest_kinds()` gives the flat name → content_kind
-    view the parser registry wants.
+    `{"content_kind": <kind>, "optional": <bool>, "role": <role>}`, where
+    `optional: True` makes the input **optional** and `role` names what
+    the input is to the output (`primary` or `supplemental`). Both forms
+    are normalized to `InputSpec` here so callers never see the raw
+    shape; `manifest_kinds()` gives the flat name → content_kind view the
+    parser registry wants.
 
     The manifest is the pipeline's input contract — the worker validates
     dispatches against it and reports it at registration, and the CLI
@@ -224,8 +297,9 @@ def load_inputs_manifest(folder: str | Path) -> dict[str, InputSpec]:
 
     Raises:
         FileNotFoundError: if the folder has no __init__.py.
-        ValueError: if the manifest is missing, malformed, or references
-            an unknown content_kind.
+        ValueError: if the manifest is missing, malformed, references
+            an unknown content_kind, or breaks a role rule (two `primary`
+            inputs, an optional `primary`).
     """
     folder = Path(folder).resolve()
     init_file = folder / "__init__.py"
@@ -273,7 +347,28 @@ def load_inputs_manifest(folder: str | Path) -> dict[str, InputSpec]:
             )
         normalized[name] = spec
 
+    _check_roles(folder, normalized)
     return normalized
+
+
+def _check_roles(folder: Path, manifest: Mapping[str, InputSpec]) -> None:
+    """Enforce the role rules across a whole normalized manifest: at most
+    one `primary` input, and it must be required. Runs after every entry
+    is normalized so the two-primaries error can name both inputs."""
+    see = "See specs/transform-framework.md §INPUTS manifest."
+    primaries = [name for name, spec in manifest.items() if spec["role"] == "primary"]
+    if len(primaries) > 1:
+        raise ValueError(
+            f"Pipeline {folder} INPUTS declares more than one primary input "
+            f"({', '.join(repr(n) for n in primaries)}); at most one input may "
+            f"have role 'primary'. {see}"
+        )
+    for name in primaries:
+        if manifest[name]["optional"]:
+            raise ValueError(
+                f"Pipeline {folder} INPUTS[{name!r}] is the primary input and "
+                f"cannot be optional; the output is seeded from it. {see}"
+            )
 
 
 def _normalize_input_spec(folder: Path, name: str, value: object) -> InputSpec:
@@ -281,7 +376,7 @@ def _normalize_input_spec(folder: Path, name: str, value: object) -> InputSpec:
     where = f"Pipeline {folder} INPUTS[{name!r}]"
     see = "See specs/transform-framework.md §INPUTS manifest."
     if isinstance(value, str):
-        return {"content_kind": value, "optional": False}
+        return {"content_kind": value, "optional": False, "role": None}
     if isinstance(value, Mapping):
         kind = value.get("content_kind")
         if not isinstance(kind, str):
@@ -294,16 +389,24 @@ def _normalize_input_spec(folder: Path, name: str, value: object) -> InputSpec:
             raise ValueError(
                 f"{where} 'optional' must be a bool, got {optional!r}. {see}"
             )
-        unknown_keys = set(value) - {"content_kind", "optional"}
+        unknown_keys = set(value) - {"content_kind", "optional", "role"}
         if unknown_keys:
             raise ValueError(
                 f"{where} has unknown key(s) {sorted(unknown_keys)}; only "
-                f"'content_kind' and 'optional' are allowed. {see}"
+                f"'content_kind', 'optional' and 'role' are allowed. {see}"
             )
-        return {"content_kind": kind, "optional": optional}
+        role = value.get("role")
+        if role is not None and role not in INPUT_ROLES:
+            raise ValueError(
+                f"{where} 'role' must be one of "
+                f"{', '.join(repr(r) for r in INPUT_ROLES)} (or absent for a "
+                f"reference input), got {role!r}. {see}"
+            )
+        return {"content_kind": kind, "optional": optional, "role": role}
     raise ValueError(
         f"{where} must be a content_kind string or a "
-        f"{{'content_kind': ..., 'optional': ...}} mapping; got {value!r}. {see}"
+        f"{{'content_kind': ..., 'optional': ..., 'role': ...}} mapping; "
+        f"got {value!r}. {see}"
     )
 
 
@@ -373,7 +476,12 @@ def dag_edges(steps: list[Step]) -> list[tuple[Step, Step]]:
     so every renderer of the DAG (resolve_dag itself, the ReactFlow export,
     the CLI's mermaid view) shows the edges that actually execute rather
     than each re-deriving (or crashing on) the `"*"` sentinel (#683).
+
+    Checks carry no edges, and wildcards range over transforms only
+    (specs/transform-framework.md §Checks in the resolved order): a check's
+    position is its role — after every transform — not an edge.
     """
+    steps = [s for s in steps if not s.is_check]
     step_set = set(id(s) for s in steps)
     edges: list[tuple[Step, Step]] = []
     for s in steps:
@@ -412,7 +520,14 @@ def resolve_dag(steps: list[Step]) -> list[Step]:
     transforms. Multiple wildcards of the same kind don't edge to each
     other (that would be a cycle); they order among themselves via
     (priority, name) in the ready queue.
+
+    Checks (specs/transform-framework.md §Checks in the resolved order)
+    follow every transform, ordered by name; they carry no edges, and
+    `priority` does not apply to them.
     """
+    validate_roles(steps)
+    checks = sorted((s for s in steps if s.is_check), key=lambda s: s.name)
+    steps = [s for s in steps if not s.is_check]
     edges = dag_edges(steps)
 
     # Kahn's algorithm
@@ -442,7 +557,7 @@ def resolve_dag(steps: list[Step]) -> list[Step]:
         unresolved = [s.name for s in steps if s.name not in resolved_names]
         raise ValueError(f"Cycle detected in DAG. Unresolved steps: {unresolved}")
 
-    return result
+    return result + checks
 
 
 def select_with_ancestors(steps: list[Step], target_name: str) -> list[Step]:
@@ -460,6 +575,10 @@ def select_with_ancestors(steps: list[Step], target_name: str) -> list[Step]:
       steps). Without this, `--select` on a pipeline with a wildcard
       init step (seeding `ctx.output`, for example) would run the
       target against an un-seeded context.
+
+    A check target selects every transform: a check reads the output every
+    transform produced (specs/transform-framework.md §Checks in the
+    resolved order). A transform target never selects a check.
 
     `after="*"` is deliberately NOT pulled in as a descendant —
     `select_with_ancestors` walks the UP direction only (things the
@@ -480,6 +599,11 @@ def select_with_ancestors(steps: list[Step], target_name: str) -> list[Step]:
         raise ValueError(
             f"No step named '{target_name}'. Available: {', '.join(available)}"
         )
+
+    if target.is_check:
+        # A check reads the output every transform produced
+        # (specs/transform-framework.md §Checks in the resolved order).
+        return [s for s in steps if not s.is_check or s is target]
 
     # Reverse-lookup index: step_id -> list of steps that must run before it
     # because some other step has it in its `before` list.
@@ -533,6 +657,7 @@ def export_reactflow(steps: list[Step]) -> dict:
                 "id": s.name,
                 "label": s.label,
                 "type": "builtin" if s.is_builtin else "custom",
+                "role": s.role,
                 "builtin": s.builtin_name,
                 "files": list(s.files),
                 "source_file": s.source_file,

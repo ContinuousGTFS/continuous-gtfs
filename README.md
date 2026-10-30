@@ -71,6 +71,9 @@ Requires Python 3.12+.
 ## What's in the box
 
 - **Step framework** — `@step` functions and `Step` classes with `files=`, `after=`, `before=` ordering; `scan_pipeline()` / `resolve_dag()` discover and order a pipeline folder's steps.
+- **Checks** — `@check` functions and `Check` classes run after every transform, in parallel, against read-only views of the output; they report findings and never change the feed or fail the run.
+- **Evaluation clock** — every step reads `ctx.now`, one moment per run, so a run replays deterministically (`--now` pins it from the CLI).
+- **Directory inputs** — a `file_tree` input kind hands a step a whole directory as a `FileTree`, packed with a byte-deterministic zip encoding.
 - **Schedule builtins** — `RemoveRows`, `UpdateFields`, `ClearField`, `SortRows`, `TransformTripId`, `UpdateFeedInfo`, semantic removals (`RemoveRoutes` / `RemoveTrips` / `RemoveStops` / `RemoveServices` with reference-following), and more, all operating on [Polars](https://pola.rs) DataFrames.
 - **Realtime builtins** — `FilterStopsByID`, `RenameVehicles`, `TransformTripId`, `CombineFeeds`, `ExpireCancelledTrips`, `InsertMissingCancellations`, `ConvertScheduledToNew`, and more, operating on GTFS-RT `FeedMessage` protobufs.
 - **Testing kit** — `continuous_gtfs.testing` gives you `gtfs_df`, `schedule_context`, `realtime_context`, feed builders, and `assert_unchanged` for unit-testing a single step against a tiny in-memory fixture. No network, no real feed.
