@@ -289,7 +289,7 @@ def load_inputs_manifest(folder: str | Path) -> dict[str, InputSpec]:
     a bare `content_kind` string — a **required** input — or a mapping
     `{"content_kind": <kind>, "optional": <bool>, "role": <role>}`, where
     `optional: True` makes the input **optional** and `role` names what
-    the input is to the output (`primary` or `supplemental`). Both forms
+    the input is to the output (`primary`, `supplemental` or `baseline`). Both forms
     are normalized to `InputSpec` here so callers never see the raw
     shape; `manifest_kinds()` gives the flat name → content_kind view the
     parser registry wants.
@@ -302,7 +302,8 @@ def load_inputs_manifest(folder: str | Path) -> dict[str, InputSpec]:
         FileNotFoundError: if the folder has no __init__.py.
         ValueError: if the manifest is missing, malformed, references
             an unknown content_kind, or breaks a role rule (two `primary`
-            inputs, an optional `primary`).
+            inputs, an optional `primary`, a `baseline` input on a realtime
+            pipeline).
     """
     folder = Path(folder).resolve()
     init_file = folder / "__init__.py"
