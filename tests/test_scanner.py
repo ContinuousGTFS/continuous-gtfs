@@ -494,6 +494,7 @@ def test_load_inputs_manifest_unknown_role_raises(tmp_path):
     message = str(exc.value)
     assert "'published'" in message
     assert "'primary'" in message and "'supplemental'" in message
+    assert "'baseline'" in message
     assert "'reference'" in message
     assert "specs/transform-framework.md §INPUTS manifest" in message
 
@@ -655,3 +656,48 @@ def test_dag_edges_expands_wildcards(tmp_path):
     rf_edges = {(e["source"], e["target"]) for e in rf["edges"]}
     assert ("a", "summary") in rf_edges
     assert ("b", "summary") in rf_edges
+
+
+def test_load_inputs_manifest_baseline_role_on_a_schedule_pipeline(tmp_path):
+    from continuous_gtfs.scanner import load_inputs_manifest
+
+    _write_file(
+        tmp_path,
+        "__init__.py",
+        """\
+        FEED_TYPE = "schedule"
+        INPUTS = {
+            "schedule": {"content_kind": "gtfs_schedule_zip", "role": "primary"},
+            "published": {
+                "content_kind": "gtfs_schedule_zip",
+                "optional": True,
+                "role": "baseline",
+            },
+        }
+    """,
+    )
+    manifest = load_inputs_manifest(tmp_path)
+    assert manifest["published"] == {
+        "content_kind": "gtfs_schedule_zip",
+        "optional": True,
+        "role": "baseline",
+    }
+
+
+def test_load_inputs_manifest_baseline_role_on_a_realtime_pipeline_raises(tmp_path):
+    from continuous_gtfs.scanner import load_inputs_manifest
+
+    _write_file(
+        tmp_path,
+        "__init__.py",
+        """\
+        FEED_TYPE = "realtime"
+        INPUTS = {
+            "vehicles": "gtfs_rt_protobuf",
+            "schedule": {"content_kind": "gtfs_schedule_zip", "role": "baseline"},
+        }
+    """,
+    )
+    with pytest.raises(ValueError, match="only a schedule pipeline") as exc:
+        load_inputs_manifest(tmp_path)
+    assert "'schedule'" in str(exc.value)
