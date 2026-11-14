@@ -14,11 +14,14 @@ from typing import Literal, TypedDict
 from .parsers import known_kinds
 from .step import Step, definition_hash, definition_text
 
-InputRole = Literal["primary", "supplemental"]
+InputRole = Literal["primary", "supplemental", "baseline"]
 
 # The `role` vocabulary an INPUTS mapping entry may declare. Absent means a
-# reference input; there is deliberately no word for it.
-INPUT_ROLES: tuple[InputRole, ...] = ("primary", "supplemental")
+# reference input; there is deliberately no word for it. `primary` and
+# `supplemental` are descriptive. `baseline` marks the published output the
+# new output is compared against: the platform records a new version of it
+# without starting a run. Schedule pipelines only.
+INPUT_ROLES: tuple[InputRole, ...] = ("primary", "supplemental", "baseline")
 
 
 class InputSpec(TypedDict):
@@ -286,7 +289,7 @@ def load_inputs_manifest(folder: str | Path) -> dict[str, InputSpec]:
     a bare `content_kind` string — a **required** input — or a mapping
     `{"content_kind": <kind>, "optional": <bool>, "role": <role>}`, where
     `optional: True` makes the input **optional** and `role` names what
-    the input is to the output (`primary` or `supplemental`). Both forms
+    the input is to the output (`primary`, `supplemental` or `baseline`). Both forms
     are normalized to `InputSpec` here so callers never see the raw
     shape; `manifest_kinds()` gives the flat name → content_kind view the
     parser registry wants.
@@ -299,7 +302,8 @@ def load_inputs_manifest(folder: str | Path) -> dict[str, InputSpec]:
         FileNotFoundError: if the folder has no __init__.py.
         ValueError: if the manifest is missing, malformed, references
             an unknown content_kind, or breaks a role rule (two `primary`
-            inputs, an optional `primary`).
+            inputs, an optional `primary`, a `baseline` input on a realtime
+            pipeline).
     """
     folder = Path(folder).resolve()
     init_file = folder / "__init__.py"
@@ -353,9 +357,17 @@ def load_inputs_manifest(folder: str | Path) -> dict[str, InputSpec]:
 
 def _check_roles(folder: Path, manifest: Mapping[str, InputSpec]) -> None:
     """Enforce the role rules across a whole normalized manifest: at most
-    one `primary` input, and it must be required. Runs after every entry
-    is normalized so the two-primaries error can name both inputs."""
+    one `primary` input, and it must be required; `baseline` only on a
+    schedule pipeline. Runs after every entry is normalized so the
+    two-primaries error can name both inputs."""
     see = "See specs/transform-framework.md §INPUTS manifest."
+    baselines = [name for name, spec in manifest.items() if spec["role"] == "baseline"]
+    if baselines and load_feed_type(folder) != "schedule":
+        raise ValueError(
+            f"Pipeline {folder} INPUTS[{baselines[0]!r}] declares role 'baseline', "
+            f"which only a schedule pipeline may declare: a realtime pipeline's "
+            f"inputs are streams with no published version to compare against. {see}"
+        )
     primaries = [name for name, spec in manifest.items() if spec["role"] == "primary"]
     if len(primaries) > 1:
         raise ValueError(

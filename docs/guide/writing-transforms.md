@@ -52,13 +52,14 @@ An entry's value is either a bare `content_kind` string or a mapping with `conte
 
 The bare string is the common form. Mark an input optional only when the pipeline genuinely produces correct output without it.
 
-A mapping may also declare a **`role`**, saying what the input is to the pipeline's output. Transforms never see it and the framework never changes how it runs because of it; it is there for tools that display the pipeline, which cannot tell a merged-in feed from a reference feed by its name or kind:
+A mapping may also declare a **`role`**, saying what the input is to the pipeline's output. Transforms never see it, and a local run never changes because of it. It is there for the platform and for tools that display the pipeline, which cannot tell a merged-in feed from a reference feed by its name or kind:
 
 - **`"primary"`** — the input the output is seeded from (the schedule a schedule pipeline transforms). At most one per pipeline, and it must be required.
 - **`"supplemental"`** — agency data merged into the output alongside the primary input, like a stations or shuttle feed. Required or optional.
-- **No role** — a reference input the transforms read without merging it: a published feed a cross-release check compares against, a stop-overrides table. This is the default, and a bare string always means it.
+- **`"baseline"`** — the published output the new output is compared against, such as the feed a later environment serves, read by a check that compares releases. A platform running the pipeline records a new version of a baseline input without starting a run, and the pipeline reads it at its next run. Schedule pipelines only. Usually optional, so the first run works before anything is published.
+- **No role** — a reference input the transforms read without merging it, such as a stop-overrides table. This is the default, and a bare string always means it.
 
-A manifest with two primary inputs, an optional primary, or any other `role` value fails at scan time, naming the input.
+A manifest with two primary inputs, an optional primary, a `baseline` input on a realtime pipeline, or any other `role` value fails at scan time, naming the input.
 
 Each `content_kind` determines the shape transforms see when they read the input:
 
