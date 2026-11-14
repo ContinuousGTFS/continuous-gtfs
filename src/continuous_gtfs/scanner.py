@@ -14,11 +14,14 @@ from typing import Literal, TypedDict
 from .parsers import known_kinds
 from .step import Step, definition_hash, definition_text
 
-InputRole = Literal["primary", "supplemental"]
+InputRole = Literal["primary", "supplemental", "baseline"]
 
 # The `role` vocabulary an INPUTS mapping entry may declare. Absent means a
-# reference input; there is deliberately no word for it.
-INPUT_ROLES: tuple[InputRole, ...] = ("primary", "supplemental")
+# reference input; there is deliberately no word for it. `primary` and
+# `supplemental` are descriptive. `baseline` marks the published output the
+# new output is compared against: the platform records a new version of it
+# without starting a run. Schedule pipelines only.
+INPUT_ROLES: tuple[InputRole, ...] = ("primary", "supplemental", "baseline")
 
 
 class InputSpec(TypedDict):
@@ -353,9 +356,17 @@ def load_inputs_manifest(folder: str | Path) -> dict[str, InputSpec]:
 
 def _check_roles(folder: Path, manifest: Mapping[str, InputSpec]) -> None:
     """Enforce the role rules across a whole normalized manifest: at most
-    one `primary` input, and it must be required. Runs after every entry
-    is normalized so the two-primaries error can name both inputs."""
+    one `primary` input, and it must be required; `baseline` only on a
+    schedule pipeline. Runs after every entry is normalized so the
+    two-primaries error can name both inputs."""
     see = "See specs/transform-framework.md §INPUTS manifest."
+    baselines = [name for name, spec in manifest.items() if spec["role"] == "baseline"]
+    if baselines and load_feed_type(folder) != "schedule":
+        raise ValueError(
+            f"Pipeline {folder} INPUTS[{baselines[0]!r}] declares role 'baseline', "
+            f"which only a schedule pipeline may declare: a realtime pipeline's "
+            f"inputs are streams with no published version to compare against. {see}"
+        )
     primaries = [name for name, spec in manifest.items() if spec["role"] == "primary"]
     if len(primaries) > 1:
         raise ValueError(
